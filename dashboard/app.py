@@ -7,23 +7,22 @@ import os
 
 st.set_page_config(
     page_title="TigerGraph Agentic GraphRAG Dashboard",
-    page_icon="🐅",
     layout="wide"
 )
 
-st.title("🐅 TigerGraph Agentic GraphRAG — Evaluation & Live Dashboard")
+st.title("TigerGraph Agentic GraphRAG — Evaluation & Live Dashboard")
 st.markdown("""
 This dashboard compares the 3 required pipelines: **Standard RAG**, **GraphRAG**, and **Agentic GraphRAG** 
 across **Accuracy**, **Completeness**, and **Token Efficiency**.
 """)
 
 # Sidebar settings
-st.sidebar.header("⚙️ Configuration")
+st.sidebar.header("Configuration")
 llm_provider = st.sidebar.selectbox("Active LLM Provider", ["Google GenAI (Gemini)", "xAI (Grok)"])
 db_status = st.sidebar.success("TigerGraph Savanna: Connected")
 
 # Tabs
-tab_metrics, tab_live, tab_schema = st.tabs(["📊 Benchmark Metrics", "🔍 Live Query Investigator", "🕸️ Graph Schema"])
+tab_metrics, tab_live, tab_schema = st.tabs(["Benchmark Metrics", "Live Query Investigator", "Graph Schema"])
 
 with tab_metrics:
     st.subheader("Automated Benchmark Results (eval_public.jsonl)")

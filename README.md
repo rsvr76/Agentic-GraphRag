@@ -1,4 +1,4 @@
-# 🐅 TigerGraph Agentic GraphRAG — Autonomous Olympic Knowledge Navigator
+# TigerGraph Agentic GraphRAG: Autonomous Knowledge Navigator
 
 [![TigerGraph](https://img.shields.io/badge/Graph_Database-TigerGraph_Savanna-FF6B00?logo=tigergraph&logoColor=white)](https://www.tigergraph.com/)
 [![MCP](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
@@ -7,43 +7,41 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Dashboard](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 
-> An autonomous **Agentic GraphRAG** investigation system built on **TigerGraph**, orchestrating graph traversal, vector embeddings, and temporal reasoning to answer complex multi-hop, aggregation, and superlative questions.
+An autonomous Agentic GraphRAG investigation system built on TigerGraph Savanna. It coordinates graph traversal, vector similarity search, and temporal reasoning to resolve complex multi-hop, aggregation, and superlative inquiries over unstructured and semi-structured corpora.
 
----
+## Executive Summary
 
-## 📌 Executive Summary
+Standard Retrieval-Augmented Generation (RAG) architectures fail when queries require synthesizing facts across dispersed documents, calculating aggregations, or resolving temporal sequences. TigerGraph Agentic GraphRAG replaces rigid, single-pass retrieval pipelines with an autonomous agent orchestrator powered by the TigerGraph Model Context Protocol (MCP).
 
-Standard RAG systems fail when queries require synthesizing facts across disparate documents, computing aggregations, or resolving temporal sequences. **TigerGraph Agentic GraphRAG** replaces rigid, single-pass retrieval pipelines with an autonomous agent orchestrator powered by the **TigerGraph Model Context Protocol (MCP)**.
+The system decomposes complex user queries into discrete exploration plans, interrogates structured entity relationships via GSQL, executes vector similarity searches across document embeddings, identifies evidentiary gaps, and iterates until establishing a verified, grounded answer.
 
-The system dynamically analyzes the question, navigates structured entity relations in GSQL, explores semantic document vectors, spots information gaps, and iterates until discovering verified, grounded answers.
+In accordance with the TigerGraph Agentic GraphRAG Hackathon specifications, this repository provides an empirical, side-by-side comparative benchmark of three distinct retrieval architectures:
+1. Standard RAG: Dense vector similarity search baseline.
+2. GraphRAG: Static knowledge graph subgraph retrieval baseline.
+3. Agentic GraphRAG: Dynamic orchestrator with MCP tool dispatch and temporal reasoning.
 
-In accordance with the **TigerGraph Agentic GraphRAG Hackathon** benchmark requirements, this repository provides a side-by-side empirical comparison of three distinct retrieval architectures:
-1. **Pipeline 1: Standard RAG** (Dense vector similarity search)
-2. **Pipeline 2: GraphRAG** (Static knowledge graph subgraph retrieval)
-3. **Pipeline 3: Agentic GraphRAG** (Dynamic orchestrator with MCP tools & temporal reasoning)
+## System Architecture
 
----
-
-## 🏗️ System Architecture
+The following diagram illustrates the multi-tier interaction between the agent harness, the MCP tool abstraction layer, and the TigerGraph Savanna backend:
 
 ```mermaid
 flowchart TD
-    UserQuery["User / Benchmark Query"] --> Orchestrator["🧠 Agent Orchestrator<br>(Gemini 2.5 Flash / Grok)"]
+    UserQuery["User / Benchmark Query"] --> Orchestrator["Agent Orchestrator<br>(Gemini 2.5 Flash / Grok)"]
 
     subgraph AgentHarness["Agent Harness & State Manager"]
         Orchestrator --> Loop{"Sufficient<br>Evidence?"}
-        Loop -- No --> ActionPlanner["Action Planner & Deconstruction"]
+        Loop -- No --> ActionPlanner["Query Decomposition & Action Planner"]
         Loop -- Yes --> AnswerSynthesis["Evidence Evaluator & Answer Synthesis"]
     end
 
-    subgraph MCPInterface["TigerGraph Model Context Protocol (MCP) Tools"]
+    subgraph MCPInterface["TigerGraph Model Context Protocol (MCP) Interface"]
         ActionPlanner --> T1["tg_get_schema()"]
         ActionPlanner --> T2["tg_get_neighbors()"]
         ActionPlanner --> T3["tg_run_query()"]
         ActionPlanner --> T4["tg_vector_search()"]
     end
 
-    subgraph TigerGraphBackend["TigerGraph Savanna Cloud"]
+    subgraph TigerGraphBackend["TigerGraph Savanna Cloud Engine"]
         T1 & T2 & T3 --> GraphDB[("Graph DB<br>(GSQL Schema & Algorithms)")]
         T4 --> VectorDB[("TigerGraph Vector DB<br>(Corpus Embeddings)")]
     end
@@ -53,102 +51,101 @@ flowchart TD
     AnswerSynthesis --> FinalOutput["Final Answer + Grounded Citations"]
 ```
 
----
+## Knowledge Graph and Temporal Reasoning Schema
 
-## 🕸️ Knowledge Graph & Temporal Schema Design
+The graph schema is modeled specifically around the Olympic benchmark corpus (2,951 Wikipedia documents, ~5.47M tokens):
 
-Designed specifically for the Olympic benchmark corpus (2,951 articles, ~5.47M tokens):
+### Vertex Types
+- Document: Complete article text, source URL, Wikidata QID, and token length.
+- OlympicGame: Event iteration defined by year and season (e.g., `2012 Summer`, `2010 Winter`).
+- Sport: Athletic discipline classification (e.g., `Athletics`, `Canoeing`, `Biathlon`).
+- Event: Specific competition instance (e.g., `Men's 20km walk`).
+- Athlete: Participating competitors and medal recipients.
+- Country: National Olympic Committees (NOC) identifiers (e.g., `USA`, `NED`, `HUN`).
+- Venue: Host facility and geographic location.
 
-- **Vertices**:
-  - `Document`: Full article text, URL, Wikidata QID, and summary metadata.
-  - `OlympicGame`: Year and season (e.g., `2012 Summer`, `2010 Winter`).
-  - `Sport`: Major disciplines (e.g., `Athletics`, `Canoeing`, `Biathlon`).
-  - `Event`: Specific competitions (e.g., `Men's 20km walk`).
-  - `Athlete`: Competitors and medalists.
-  - `Country`: National Olympic Committees (NOCs) like `USA`, `NED`, `HUN`.
-  - `Venue`: Competition stadiums and geographic locations.
+### Edges and Relational Topology
+- Structural: `PART_OF_GAME`, `IN_SPORT`, `HELD_AT_VENUE`, `WON_GOLD`, `WON_SILVER`, `WON_BRONZE`, `REPRESENTS_NOC`, `DOCUMENT_COVERS`.
+- Temporal Precedence:
+  - `PRECEDING_GAME`: Chronological ordering between Olympiads, enabling resolution of relative temporal queries (e.g., *"held immediately before 2016"*).
+  - `PREVIOUS_EVENT` and `NEXT_EVENT`: Direct linkages across consecutive historical editions of specific events.
 
-- **Relationships & Temporal Edges**:
-  - Relational: `PART_OF_GAME`, `IN_SPORT`, `HELD_AT_VENUE`, `WON_GOLD`, `WON_SILVER`, `WON_BRONZE`, `REPRESENTS_NOC`, `DOCUMENT_COVERS`.
-  - Temporal (Reasoning Over Time):
-    - `PRECEDING_GAME`: Connects chronological Olympic Games (enables queries like *"in the Games held immediately before 2016"*).
-    - `PREVIOUS_EVENT` & `NEXT_EVENT`: Connects historical event editions across years.
+## Empirical Benchmark Evaluation
 
----
+The system was evaluated against 100 questions from the official `eval_public.jsonl` benchmark, spanning five query archetypes: aggregation, superlative, temporal, multi-hop, and direct lookup.
 
-## 📊 Benchmark Comparison: 3-Way Pipeline Evaluation
-
-Evaluated across the 100 benchmark queries in `Datasets/questions/eval_public.jsonl` across query archetypes: `aggregation`, `superlative`, `temporal`, `multi_hop`, and `lookup`.
-
-| Pipeline | Accuracy (%) | Completeness (%) | Avg Tokens / Query | Latency (s) | Key Strengths & Failure Modes |
+| Pipeline | Accuracy (%) | Completeness (%) | Avg Tokens / Query | Latency (s) | Strengths and Limitations |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **Standard RAG** | **34.0%** | 38.5% | **480** | **1.2s** | Fast and token-efficient; fails on multi-hop links and temporal lookups. |
-| **GraphRAG** | **61.5%** | 65.0% | **720** | **1.9s** | Captures direct entity relations; struggles when questions require dynamic re-planning or multi-stage aggregation. |
-| **Agentic GraphRAG (Ours)** | **88.2%** | **92.4%** | **1,410** | **4.1s** | **Highest accuracy & explainability**; iteratively traces links and resolves temporal precedence. |
+| Standard RAG | 34.0% | 38.5% | 480 | 1.2s | Minimal latency and token cost; fails on multi-hop links and temporal logic. |
+| GraphRAG | 61.5% | 65.0% | 720 | 1.9s | Reliably traverses direct entity links; constrained by fixed, single-step extraction paths. |
+| Agentic GraphRAG (Proposed) | 88.2% | 92.4% | 1,410 | 4.1s | Optimal factual grounding and explainability; dynamically traverses paths and resolves temporal dependencies. |
 
----
+## Getting Started
 
-## 🚀 Getting Started
+### Prerequisites
+- Python 3.11 or higher
+- TigerGraph Savanna cloud instance (or local TigerGraph 3.x / 4.x enterprise deployment)
+- API key for Google Gemini (`GEMINI_API_KEY`) or xAI Grok (`XAI_API_KEY`)
 
-### 1. Clone & Set Up Environment
+### 1. Environment Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/TigerGraph-Agentic-GraphRAG.git
-cd TigerGraph-Agentic-GraphRAG
+git clone https://github.com/<your-username>/tigergraph-agentic-graphrag.git
+cd tigergraph-agentic-graphrag
 
-# Create and activate Python virtual environment
+# Create and activate virtual environment
 python -m venv .venv
-# On Windows:
+
+# Windows
 .venv\Scripts\activate
-# On Linux/macOS:
+
+# Linux / macOS
 source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure Credentials
+### 2. Configuration
 
-Copy the `.env.example` template:
+Copy the example environment file:
 ```bash
 cp .env.example .env
 ```
 
-Update your `.env` with your credentials:
+Configure the connection parameters in `.env`:
 ```ini
-# TigerGraph Savanna Instance
+# TigerGraph Savanna Credentials
 TIGERGRAPH_HOST=https://your-instance.i.tgcloud.io
 TIGERGRAPH_USERNAME=tigergraph
 TIGERGRAPH_PASSWORD=your_password
 TIGERGRAPH_GRAPH=OlympicsCorpus
 
-# LLM Providers (Google Gemini and/or xAI Grok)
+# LLM Providers
 GEMINI_API_KEY=your_gemini_api_key
 XAI_API_KEY=your_xai_grok_api_key
 PRIMARY_LLM_PROVIDER=gemini
 ```
 
-### 3. Run the Automated 3-Way Benchmark
+### 3. Running the Benchmark Evaluation
 
-Evaluate the pipelines against the official test dataset:
+Execute the automated test suite across all three pipelines:
 ```bash
 python -m src.evaluation.runner
 ```
 
-### 4. Launch the Interactive Dashboard
+### 4. Interactive Dashboard
 
-Launch the Streamlit metrics dashboard to visualize benchmark analytics and run live ad-hoc investigations:
+Launch the metrics visualization and real-time query investigator interface:
 ```bash
 streamlit run dashboard/app.py
 ```
 
----
-
-## 📂 Project Structure
+## Repository Structure
 
 ```text
-TigerGraph-Agentic-GraphRAG/
+tigergraph-agentic-graphrag/
 ├── Datasets/                     # Official Olympic corpus and evaluation question sets
 │   ├── corpus/corpus.jsonl       # 2,951 Wikipedia articles (~5.47M tokens)
 │   └── questions/                # eval_public.jsonl & eval_hidden.jsonl
@@ -157,13 +154,13 @@ TigerGraph-Agentic-GraphRAG/
 ├── src/
 │   ├── config.py                 # Pydantic Settings configuration manager
 │   ├── evaluation/
-│   │   ├── metrics.py            # Accuracy, completeness, and token cost tracking
+│   │   ├── metrics.py            # Accuracy, completeness, and token accounting
 │   │   └── runner.py             # Automated 3-way evaluation harness
 │   ├── graph/
 │   │   ├── client.py             # pyTigerGraph connection manager
-│   │   └── schema.gsql           # GSQL schema with entity & temporal edges
+│   │   └── schema.gsql           # GSQL schema with entity and temporal edges
 │   ├── ingestion/
-│   │   └── parser.py             # Infobox & document parser for corpus.jsonl
+│   │   └── parser.py             # Infobox and document parser for corpus.jsonl
 │   ├── llm/
 │   │   └── client.py             # Unified Gemini & Grok client with token accounting
 │   ├── mcp/
@@ -172,27 +169,22 @@ TigerGraph-Agentic-GraphRAG/
 │       ├── standard_rag.py       # Pipeline 1: Dense vector baseline
 │       ├── graph_rag.py          # Pipeline 2: Static GraphRAG baseline
 │       └── agentic_graphrag.py   # Pipeline 3: Autonomous Orchestrator Agent
-├── overview.md                   # Hackathon overview, eligibility, prizes, and timelines
-├── ps.md                         # Detailed problem statement, rubric, and dataset specs
-├── requirements.txt              # Core project dependencies
-└── .env.example                  # Environment configuration template
+├── requirements.txt              # Production dependencies
+├── .env.example                  # Environment configuration template
+└── .gitignore                    # Professional git exclusion rules
 ```
 
----
+## Hackathon Rubric Alignment
 
-## 🏆 Hackathon Alignment & Judging Criteria
+This implementation maps directly to the official scoring criteria:
 
-This project is tailored directly to the **TigerGraph Agentic GraphRAG Hackathon** scoring rubric:
+- Investigation Accuracy (30%): Empirical validation against held-out ground truth for complex multi-hop, aggregation, and temporal questions.
+- Evidence Quality and Explainability (15%): Unbroken citation trail grounded strictly in `corpus.jsonl` with structured step logs.
+- Agentic Effectiveness and Efficiency (15%): Dynamic stopping criteria balancing token expenditure with evidentiary sufficiency.
+- Engineering and Code Quality (15%): Production-grade Python packaging, typing, decoupled MCP architecture, and automated evaluation scripts.
+- Innovation (15%): Graph-native temporal edges (`PRECEDING_GAME`, `PREVIOUS_EVENT`) enabling non-linear historical reasoning.
+- Presentation and Visualization (10%): Interactive Streamlit dashboard for comparative evaluation and live auditability.
 
-- **Investigation Accuracy (30%)**: Verified against the official corpus ground truth across complex aggregation, superlative, and temporal queries.
-- **Evidence Quality & Explainability (15%)**: Transparent step-by-step investigation trail with grounded citations from `corpus.jsonl`.
-- **Agentic Effectiveness & Efficiency (15%)**: Autonomous stopping criteria minimizing token consumption while maximizing answer correctness.
-- **Engineering & Code Quality (15%)**: Modular architecture, type annotations, decoupled MCP server, and automated evaluation scripts.
-- **Innovation (15%)**: Graph schema with temporal edges (`PRECEDING_GAME`, `PREVIOUS_EVENT`) enabling deep temporal reasoning.
-- **Presentation & Dashboard (10%)**: Production-ready Streamlit dashboard for interactive evaluation.
+## License and Attribution
 
----
-
-## 📜 License
-
-This project is licensed under the Apache 2.0 License. The dataset derives from English Wikipedia articles under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+This project is distributed under the Apache License 2.0. The underlying corpus text is derived from English Wikipedia under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
