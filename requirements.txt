@@ -2,10 +2,13 @@
 pyTigerGraph>=1.5.0
 mcp>=1.0.0
 
-# LLM Providers (Google GenAI & Grok/xAI via OpenAI SDK)
+# LLM Providers (Groq via OpenAI SDK & Google GenAI)
+openai>=1.50.0
 google-genai>=0.1.1
 google-generativeai>=0.8.0
-openai>=1.50.0
+
+# Local Offline Vector Embeddings (ONNX Runtime - lightweight, <300MB RAM)
+fastembed>=0.3.0
 
 # Data & Structured Processing
 pydantic>=2.7.0

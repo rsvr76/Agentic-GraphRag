@@ -12,28 +12,31 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # TigerGraph Credentials
+    # TigerGraph Savanna Credentials
     tigergraph_host: str = "https://your-instance.i.tgcloud.io"
     tigergraph_username: str = "tigergraph"
     tigergraph_password: str = "tigergraph"
-    tigergraph_graph: str = "OlympicsCorpus"
+    tigergraph_graph: str = "Olympics"
     tigergraph_secret: str = ""
     tigergraph_token: str = ""
 
-    # LLM Providers
+    # LLM Providers (Groq primary, Gemini fallback)
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "llama-3.3-70b-versatile"
     gemini_api_key: str = ""
-    xai_api_key: str = ""
-    xai_base_url: str = "https://api.x.ai/v1"
-
-    # Default Models
-    primary_llm_provider: Literal["gemini", "grok"] = "gemini"
     gemini_model: str = "gemini-2.5-flash"
-    grok_model: str = "grok-beta"
-    embedding_model: str = "text-embedding-004"
 
-    # Execution Parameters
-    max_agent_steps: int = 8
-    top_k_retrieval: int = 5
+    # Default LLM Provider selection
+    primary_llm_provider: Literal["groq", "gemini"] = "groq"
+
+    # Local Offline Embeddings (FastEmbed ONNX Runtime - <300MB RAM)
+    local_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_batch_size: int = 32
+
+    # Benchmark & Agent Harness Parameters
+    max_agent_steps: int = 6
+    top_k_retrieval: int = 10
 
 
 settings = Settings()

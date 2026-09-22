@@ -72,13 +72,17 @@ The graph schema is modeled specifically around the Olympic benchmark corpus (2,
 
 ## Empirical Benchmark Evaluation
 
-The system was evaluated against 100 questions from the official `eval_public.jsonl` benchmark, spanning five query archetypes: aggregation, superlative, temporal, multi-hop, and direct lookup.
+The three retrieval pipelines are evaluated across the 100 questions in `Datasets/questions/eval_public.jsonl`, covering five query archetypes: aggregation, superlative, temporal, multi-hop, and direct lookup.
 
-| Pipeline | Accuracy (%) | Completeness (%) | Avg Tokens / Query | Latency (s) | Strengths and Limitations |
+Metrics are computed via the automated evaluation harness (`python -m src.evaluation.runner`), which logs prompt tokens, completion tokens, latency, accuracy against ground truth, and completeness score.
+
+| Pipeline | Accuracy (%) | Completeness (%) | Avg Tokens / Query | Avg Latency (s) | Evaluation Status |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| Standard RAG | 34.0% | 38.5% | 480 | 1.2s | Minimal latency and token cost; fails on multi-hop links and temporal logic. |
-| GraphRAG | 61.5% | 65.0% | 720 | 1.9s | Reliably traverses direct entity links; constrained by fixed, single-step extraction paths. |
-| Agentic GraphRAG (Proposed) | 88.2% | 92.4% | 1,410 | 4.1s | Optimal factual grounding and explainability; dynamically traverses paths and resolves temporal dependencies. |
+| Standard RAG | Pending run | Pending run | Pending run | Pending run | Awaiting full-corpus benchmark run |
+| GraphRAG | Pending run | Pending run | Pending run | Pending run | Awaiting full-corpus benchmark run |
+| Agentic GraphRAG | Pending run | Pending run | Pending run | Pending run | Awaiting full-corpus benchmark run |
+
+Note: Benchmark metrics will be populated strictly following completion and logging of the full verification run across the entire evaluation set. Unverified or estimated numbers are omitted to preserve benchmark integrity.
 
 ## Getting Started
 
@@ -130,7 +134,7 @@ PRIMARY_LLM_PROVIDER=gemini
 
 ### 3. Running the Benchmark Evaluation
 
-Execute the automated test suite across all three pipelines:
+Execute the automated test suite across all three pipelines to log verifiable performance metrics:
 ```bash
 python -m src.evaluation.runner
 ```
@@ -151,6 +155,12 @@ tigergraph-agentic-graphrag/
 │   └── questions/                # eval_public.jsonl & eval_hidden.jsonl
 ├── dashboard/
 │   └── app.py                    # Streamlit metrics dashboard & query visualizer
+├── docs/                         # Specifications and source-of-truth project reference documents
+│   ├── plan.md                   # Concrete technical implementation plan
+│   ├── project.md                # Problem analysis, design decisions, and research reference
+│   ├── implementation-plan.md    # Multi-phase execution roadmap
+│   ├── overview.md               # Hackathon overview, eligibility, and prize breakdown
+│   └── ps.md                     # Detailed problem statement, rubric, and dataset specs
 ├── src/
 │   ├── config.py                 # Pydantic Settings configuration manager
 │   ├── evaluation/

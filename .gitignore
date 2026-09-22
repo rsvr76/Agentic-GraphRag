@@ -36,17 +36,20 @@ desktop.ini
 
 # Local notes and scratch
 trash/
-MEMORY.md
-LOGS.md
-overview.md
-ps.md
+reference/
 
 # Large datasets & corpus dumps
 Datasets/corpus/
+data/processed/*.npz
+data/processed/*.jsonl
+data/processed/*.parquet
+!data/processed/.gitkeep
 
 # Documents
+*.md
 *.pdf
 *.doc
 *.docx
 *.rtf
 *.odt
+

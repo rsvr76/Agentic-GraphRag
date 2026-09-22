@@ -1,0 +1,85 @@
+// ========================================================
+// Parameterized GSQL Queries for Agentic GraphRAG Archetypes
+// Aligned with Final Plan (v3) Section 6 & 10.2
+// ========================================================
+
+USE GRAPH Olympics
+
+// --------------------------------------------------------
+// 1. Aggregation Query: Count Events with Competitors > Threshold
+// Answers queries like: "how many shooting events at 2004 Summer Olympics had more than 37 competitors?"
+// --------------------------------------------------------
+CREATE QUERY count_events_by_competitors(STRING sport_name, STRING comp_id, INT min_competitors) FOR GRAPH Olympics {
+    SumAccum<INT> @@event_count = 0;
+    
+    Comp = {Competition.*};
+    TargetComp = SELECT c FROM Comp:c WHERE c.competition_id == comp_id;
+    
+    Events = SELECT e FROM TargetComp -(PART_OF:p)- Event:e
+             WHERE (sport_name == "" OR e.sport == sport_name) AND e.competitors > min_competitors
+             ACCUM @@event_count += 1;
+             
+    PRINT @@event_count AS result_count;
+}
+
+// --------------------------------------------------------
+// 2. Superlative Query: Event with Highest Competitors
+// Answers queries like: "which sailing event at 2000 Summer Olympics had highest number of competitors?"
+// Uses HeapAccum(1) to find exact superlative directly in TigerGraph
+// --------------------------------------------------------
+TYPEDEF TUPLE<STRING event_name, INT competitors> EventRankTuple;
+
+CREATE QUERY superlative_event_by_competitors(STRING sport_name, STRING comp_id, BOOL find_max) FOR GRAPH Olympics {
+    HeapAccum<EventRankTuple>(1, competitors DESC) @@max_event;
+    HeapAccum<EventRankTuple>(1, competitors ASC) @@min_event;
+    
+    Comp = {Competition.*};
+    TargetComp = SELECT c FROM Comp:c WHERE c.competition_id == comp_id;
+    
+    Events = SELECT e FROM TargetComp -(PART_OF:p)- Event:e
+             WHERE (sport_name == "" OR e.sport == sport_name) AND e.competitors > 0
+             ACCUM 
+                 IF find_max THEN 
+                     @@max_event += EventRankTuple(e.name, e.competitors)
+                 ELSE 
+                     @@min_event += EventRankTuple(e.name, e.competitors)
+                 END;
+                 
+    IF find_max THEN
+        PRINT @@max_event AS superlative_result;
+    ELSE
+        PRINT @@min_event AS superlative_result;
+    END;
+}
+
+// --------------------------------------------------------
+// 3. Temporal Query: Preceding Competition Events
+// Answers queries like: "Who won gold in men's pole vault at Summer Olympics held immediately before 2016?"
+// --------------------------------------------------------
+CREATE QUERY temporal_preceding_competition(STRING current_comp_id) FOR GRAPH Olympics {
+    Comp = {Competition.*};
+    TargetComp = SELECT c FROM Comp:c WHERE c.competition_id == current_comp_id;
+    
+    PrecedingComp = SELECT p FROM TargetComp -(PRECEDES:e)- Competition:p;
+    
+    PRINT PrecedingComp[PrecedingComp.competition_id, PrecedingComp.year, PrecedingComp.season] AS preceding_competition;
+}
+
+// --------------------------------------------------------
+// 4. Multi-Hop Query: Venue + Date -> Event -> Gold Medalist
+// Answers queries like: "Who won gold in the event held at Venue on Date?"
+// --------------------------------------------------------
+CREATE QUERY find_gold_winner_by_venue_date(STRING venue_name, STRING date_str) FOR GRAPH Olympics {
+    Venues = {Venue.*};
+    TargetVenue = SELECT v FROM Venues:v WHERE v.name == venue_name OR v.venue_id == venue_name;
+    
+    Events = SELECT e FROM TargetVenue -(HELD_AT:h)- Event:e;
+    
+    Medals = {Medal.*};
+    GoldMedal = SELECT m FROM Medals:m WHERE m.type == "gold" OR m.medal_id == "gold";
+    
+    Winners = SELECT a FROM GoldMedal -(WON_MEDAL:w)- Athlete:a
+              WHERE (date_str == "" OR w.date_held == date_str);
+              
+    PRINT Winners[Winners.name] AS gold_winners;
+}

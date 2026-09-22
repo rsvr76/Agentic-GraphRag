@@ -27,27 +27,20 @@ tab_metrics, tab_live, tab_schema = st.tabs(["Benchmark Metrics", "Live Query In
 with tab_metrics:
     st.subheader("Automated Benchmark Results (eval_public.jsonl)")
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Standard RAG Accuracy", "34.0%", "Baseline")
-        st.caption("Avg Tokens / Query: 480")
-    with col2:
-        st.metric("GraphRAG Accuracy", "61.5%", "+27.5% vs RAG")
-        st.caption("Avg Tokens / Query: 720")
-    with col3:
-        st.metric("Agentic GraphRAG Accuracy", "88.2%", "+26.7% vs GraphRAG")
-        st.caption("Avg Tokens / Query: 1,410")
-        
-    st.markdown("### Comparative Performance Table")
-    df_metrics = pd.DataFrame([
-        {"Pipeline": "Standard RAG", "Accuracy (%)": 34.0, "Completeness (%)": 38.5, "Avg Tokens": 480, "Avg Latency (s)": 1.2},
-        {"Pipeline": "GraphRAG", "Accuracy (%)": 61.5, "Completeness (%)": 65.0, "Avg Tokens": 720, "Avg Latency (s)": 1.9},
-        {"Pipeline": "Agentic GraphRAG", "Accuracy (%)": 88.2, "Completeness (%)": 92.4, "Avg Tokens": 1410, "Avg Latency (s)": 4.1}
-    ])
-    st.dataframe(df_metrics, use_container_width=True)
-    
-    st.markdown("### Token vs Accuracy Tradeoff")
-    st.bar_chart(df_metrics.set_index("Pipeline")[["Accuracy (%)", "Completeness (%)"]])
+    results_file = "benchmark_results.json"
+    if os.path.exists(results_file):
+        with open(results_file, "r") as f:
+            data = json.load(f)
+        df_metrics = pd.DataFrame(data)
+        st.dataframe(df_metrics, use_container_width=True)
+    else:
+        st.info("Full verification benchmark run pending. Execute 'python -m src.evaluation.runner' to log real empirical scores.")
+        df_metrics = pd.DataFrame([
+            {"Pipeline": "Standard RAG", "Accuracy (%)": "Pending Run", "Completeness (%)": "Pending Run", "Avg Tokens": "Pending Run", "Avg Latency (s)": "Pending Run"},
+            {"Pipeline": "GraphRAG", "Accuracy (%)": "Pending Run", "Completeness (%)": "Pending Run", "Avg Tokens": "Pending Run", "Avg Latency (s)": "Pending Run"},
+            {"Pipeline": "Agentic GraphRAG", "Accuracy (%)": "Pending Run", "Completeness (%)": "Pending Run", "Avg Tokens": "Pending Run", "Avg Latency (s)": "Pending Run"}
+        ])
+        st.dataframe(df_metrics, use_container_width=True)
 
 with tab_live:
     st.subheader("Run an Ad-Hoc Investigation")

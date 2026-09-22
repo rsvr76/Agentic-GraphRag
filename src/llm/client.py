@@ -1,9 +1,12 @@
-"""Unified LLM and Embeddings client supporting Google GenAI and Grok (xAI) with token tracking."""
+"""Unified LLM client supporting Groq (LPU at console.groq.com) and Google Gemini with automatic fallback and uniform token tracking."""
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+import logging
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from src.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMResponse(BaseModel):
@@ -18,8 +21,20 @@ class LLMResponse(BaseModel):
 class UnifiedLLMClient:
     def __init__(self, provider: Optional[str] = None):
         self.provider = provider or settings.primary_llm_provider
+        self._groq_client = None
         self._gemini_client = None
-        self._grok_client = None
+
+    def _get_groq_client(self):
+        api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
+        if not api_key or api_key.startswith("your_"):
+            return None
+        if self._groq_client is None:
+            from openai import OpenAI
+            self._groq_client = OpenAI(
+                api_key=api_key,
+                base_url=settings.groq_base_url
+            )
+        return self._groq_client
 
     def _get_gemini_client(self):
         api_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
@@ -38,45 +53,24 @@ class UnifiedLLMClient:
                     self._gemini_client = None
         return self._gemini_client
 
-    def _get_grok_client(self):
-        api_key = settings.xai_api_key or os.getenv("XAI_API_KEY")
-        if not api_key or api_key.startswith("your_"):
-            return None
-        if self._grok_client is None:
-            from openai import OpenAI
-            self._grok_client = OpenAI(
-                api_key=api_key,
-                base_url=settings.xai_base_url
-            )
-        return self._grok_client
-
-    def generate(
+    def _generate_groq(
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        provider: Optional[str] = None,
         model: Optional[str] = None,
         temperature: float = 0.2
-    ) -> LLMResponse:
-        active_provider = provider or self.provider
+    ) -> Optional[LLMResponse]:
+        client = self._get_groq_client()
+        if not client:
+            return None
 
-        if active_provider == "grok":
-            client = self._get_grok_client()
-            if not client:
-                return LLMResponse(
-                    content=f"[Simulated Grok response (XAI_API_KEY required in .env)]",
-                    prompt_tokens=len(prompt.split()),
-                    completion_tokens=15,
-                    total_tokens=len(prompt.split()) + 15,
-                    model=settings.grok_model,
-                    provider="grok-simulated"
-                )
-            active_model = model or settings.grok_model
-            messages = []
-            if system_instruction:
-                messages.append({"role": "system", "content": system_instruction})
-            messages.append({"role": "user", "content": prompt})
+        active_model = model or settings.groq_model
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
 
+        try:
             response = client.chat.completions.create(
                 model=active_model,
                 messages=messages,
@@ -89,89 +83,104 @@ class UnifiedLLMClient:
                 completion_tokens=usage.completion_tokens if usage else 0,
                 total_tokens=usage.total_tokens if usage else 0,
                 model=active_model,
-                provider="grok"
+                provider="groq"
             )
-        else:
-            # Default to Google GenAI / Gemini
-            active_model = model or settings.gemini_model
-            client = self._get_gemini_client()
-            if not client:
-                return LLMResponse(
-                    content=f"[Simulated Gemini response (GEMINI_API_KEY required in .env)]",
-                    prompt_tokens=len(prompt.split()),
-                    completion_tokens=15,
-                    total_tokens=len(prompt.split()) + 15,
-                    model=active_model,
-                    provider="gemini-simulated"
-                )
-            try:
-                if hasattr(client, "models"):
-                    # Modern google-genai SDK
-                    config = {}
-                    if system_instruction:
-                        config["system_instruction"] = system_instruction
-                    config["temperature"] = temperature
-                    
-                    response = client.models.generate_content(
-                        model=active_model,
-                        contents=prompt,
-                        config=config
-                    )
-                    usage = getattr(response, "usage_metadata", None)
-                    p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
-                    c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
-                    return LLMResponse(
-                        content=response.text or "",
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        total_tokens=p_tok + c_tok,
-                        model=active_model,
-                        provider="gemini"
-                    )
-                else:
-                    # Legacy google.generativeai SDK fallback
-                    gen_model = client.GenerativeModel(
-                        model_name=active_model,
-                        system_instruction=system_instruction
-                    )
-                    response = gen_model.generate_content(prompt)
-                    usage = getattr(response, "usage_metadata", None)
-                    p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
-                    c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
-                    return LLMResponse(
-                        content=response.text or "",
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        total_tokens=p_tok + c_tok,
-                        model=active_model,
-                        provider="gemini"
-                    )
-            except Exception as e:
-                # Mock response if keys not configured yet during bootstrapping
-                return LLMResponse(
-                    content=f"[LLM generation simulated (API key needed)]: {e}",
-                    prompt_tokens=len(prompt.split()),
-                    completion_tokens=20,
-                    total_tokens=len(prompt.split()) + 20,
-                    model=active_model,
-                    provider="gemini-mock"
-                )
+        except Exception as e:
+            logger.warning(f"Groq API call failed ({e}). Falling back to secondary provider if available.")
+            return None
 
-    def get_embedding(self, text: str) -> List[float]:
-        """Generate vector embedding for text using Google GenAI or fallback."""
+    def _generate_gemini(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.2
+    ) -> Optional[LLMResponse]:
+        client = self._get_gemini_client()
+        if not client:
+            return None
+
+        active_model = model or settings.gemini_model
         try:
-            from google import genai
-            client = self._get_gemini_client()
             if hasattr(client, "models"):
-                result = client.models.embed_content(
-                    model=settings.embedding_model,
-                    contents=text
+                config = {"temperature": temperature}
+                if system_instruction:
+                    config["system_instruction"] = system_instruction
+                response = client.models.generate_content(
+                    model=active_model,
+                    contents=prompt,
+                    config=config
                 )
-                return result.embeddings[0].values
-        except Exception:
-            pass
-        # Return deterministic dummy vector if offline
-        return [0.0] * 768
+                usage = getattr(response, "usage_metadata", None)
+                p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
+                c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
+                return LLMResponse(
+                    content=response.text or "",
+                    prompt_tokens=p_tok,
+                    completion_tokens=c_tok,
+                    total_tokens=p_tok + c_tok,
+                    model=active_model,
+                    provider="gemini"
+                )
+            else:
+                gen_model = client.GenerativeModel(
+                    model_name=active_model,
+                    system_instruction=system_instruction
+                )
+                response = gen_model.generate_content(prompt)
+                usage = getattr(response, "usage_metadata", None)
+                p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
+                c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
+                return LLMResponse(
+                    content=response.text or "",
+                    prompt_tokens=p_tok,
+                    completion_tokens=c_tok,
+                    total_tokens=p_tok + c_tok,
+                    model=active_model,
+                    provider="gemini"
+                )
+        except Exception as e:
+            logger.warning(f"Gemini API call failed ({e}).")
+            return None
+
+    def generate(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.2
+    ) -> LLMResponse:
+        active_provider = provider or self.provider
+
+        # Attempt primary provider first
+        if active_provider == "groq":
+            res = self._generate_groq(prompt, system_instruction, model, temperature)
+            if res is not None:
+                return res
+            # Fallback to Gemini
+            res = self._generate_gemini(prompt, system_instruction, model, temperature)
+            if res is not None:
+                return res
+        else:
+            res = self._generate_gemini(prompt, system_instruction, model, temperature)
+            if res is not None:
+                return res
+            # Fallback to Groq
+            res = self._generate_groq(prompt, system_instruction, model, temperature)
+            if res is not None:
+                return res
+
+        # Simulation response if both keys are unconfigured (safe bootstrapping mode)
+        approx_tokens = len(prompt.split())
+        return LLMResponse(
+            content="[LLM execution simulated: Please configure GROQ_API_KEY or GEMINI_API_KEY in .env]",
+            prompt_tokens=approx_tokens,
+            completion_tokens=15,
+            total_tokens=approx_tokens + 15,
+            model=model or settings.groq_model,
+            provider="simulated"
+        )
 
 
 llm_client = UnifiedLLMClient()

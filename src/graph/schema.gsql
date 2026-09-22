@@ -1,74 +1,103 @@
 // ========================================================
 // TigerGraph GSQL Schema for Olympic Corpus (Agentic GraphRAG)
+// Aligned with Final Plan (v3) Section 6
 // ========================================================
 
-CREATE GRAPH OlympicsCorpus ()
+CREATE GRAPH Olympics ()
 
-USE GRAPH OlympicsCorpus
+USE GRAPH Olympics
 
 // --------------------------------------------------------
 // Vertex Definitions
 // --------------------------------------------------------
+
 CREATE VERTEX Document (
     PRIMARY_ID doc_id STRING,
     title STRING,
-    url STRING,
-    wikidata_qid STRING,
-    approx_tokens INT,
-    summary STRING
+    raw_text STRING
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
-CREATE VERTEX OlympicGame (
-    PRIMARY_ID game_id STRING,  // e.g. "2012 Summer", "2010 Winter"
-    year INT,
-    season STRING
-) WITH STATS="OUTDEGREE_BY_EDGETYPE";
-
-CREATE VERTEX Sport (
-    PRIMARY_ID sport_id STRING, // e.g. "Canoeing", "Athletics", "Biathlon"
-    name STRING
-) WITH STATS="OUTDEGREE_BY_EDGETYPE";
-
-CREATE VERTEX Event (
-    PRIMARY_ID event_id STRING, // e.g. "Canoeing at the 2012 Summer Olympics - Men's K-2 1000 metres"
-    name STRING,
-    gender STRING,
-    competitors INT,
-    nations INT,
-    date_held STRING,
-    win_value STRING
+CREATE VERTEX Chunk (
+    PRIMARY_ID chunk_id STRING,     // format: {doc_id}::c{index}
+    doc_id STRING,
+    text STRING,
+    start_offset INT,
+    end_offset INT
+    // Note: If TigerVector is enabled (TigerGraph 4.2+), add:
+    // embedding VECTOR<FLOAT>(384)
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
 CREATE VERTEX Athlete (
     PRIMARY_ID athlete_id STRING,
     name STRING
+    // Note: If TigerVector is enabled, add:
+    // name_embedding VECTOR<FLOAT>(384)
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
-CREATE VERTEX Country (
-    PRIMARY_ID noc STRING,      // e.g. "USA", "HUN", "NED", "GER"
-    name STRING
+CREATE VERTEX Event (
+    PRIMARY_ID event_id STRING,
+    name STRING,
+    sport STRING,
+    discipline STRING,
+    gender STRING,
+    competitors INT,
+    nations INT
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Competition (
+    PRIMARY_ID competition_id STRING,   // e.g. "2012 Summer", "2010 Winter"
+    name STRING,
+    year INT,
+    season STRING,
+    host_city STRING,
+    host_country STRING
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
 CREATE VERTEX Venue (
     PRIMARY_ID venue_id STRING,
-    name STRING
+    name STRING,
+    city STRING,
+    country STRING,
+    year_built INT
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Medal (
+    PRIMARY_ID medal_id STRING,         // e.g. "gold", "silver", "bronze"
+    type STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Nation (
+    PRIMARY_ID nation_id STRING,        // e.g. "USA", "HUN", "NED", "GER"
+    name STRING,
+    noc_code STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Date (
+    PRIMARY_ID date_id STRING,          // e.g. "2012-08-04"
+    date_str STRING,
+    year INT,
+    month INT,
+    day INT
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
 // --------------------------------------------------------
-// Edge Definitions (Directed & Undirected Relationships)
+// Edge Definitions
 // --------------------------------------------------------
-CREATE DIRECTED EDGE PART_OF_GAME (FROM Event TO OlympicGame);
-CREATE DIRECTED EDGE IN_SPORT (FROM Event TO Sport);
-CREATE DIRECTED EDGE HELD_AT_VENUE (FROM Event TO Venue);
 
-CREATE DIRECTED EDGE WON_GOLD (FROM Athlete TO Event);
-CREATE DIRECTED EDGE WON_SILVER (FROM Athlete TO Event);
-CREATE DIRECTED EDGE WON_BRONZE (FROM Athlete TO Event);
+CREATE DIRECTED EDGE WON_MEDAL (FROM Athlete TO Medal, event_id STRING, competition_id STRING, date_held STRING) WITH REVERSE_EDGE="MEDAL_WON_BY";
+CREATE DIRECTED EDGE COMPETED_IN (FROM Athlete TO Event) WITH REVERSE_EDGE="HAS_COMPETITOR";
+CREATE DIRECTED EDGE HELD_AT (FROM Event TO Venue) WITH REVERSE_EDGE="HOSTED_EVENT";
+CREATE DIRECTED EDGE PART_OF (FROM Event TO Competition) WITH REVERSE_EDGE="INCLUDES_EVENT";
+CREATE DIRECTED EDGE REPRESENTS (FROM Athlete TO Nation) WITH REVERSE_EDGE="HAS_ATHLETE";
 
-CREATE DIRECTED EDGE REPRESENTS_NOC (FROM Athlete TO Country);
-CREATE DIRECTED EDGE DOCUMENT_COVERS (FROM Document TO Event);
+CREATE DIRECTED EDGE HAS_CHUNK (FROM Document TO Chunk, chunk_index INT) WITH REVERSE_EDGE="CHUNK_OF_DOC";
 
-// Temporal Edges for Reasoning Over Time
-CREATE DIRECTED EDGE PREVIOUS_EVENT (FROM Event TO Event);
-CREATE DIRECTED EDGE NEXT_EVENT (FROM Event TO Event);
-CREATE DIRECTED EDGE PRECEDING_GAME (FROM OlympicGame TO OlympicGame);
+// Mentions edge linking document to any domain entity with citation tracking
+CREATE DIRECTED EDGE MENTIONS_ATHLETE (FROM Document TO Athlete, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_ATHLETE";
+CREATE DIRECTED EDGE MENTIONS_EVENT (FROM Document TO Event, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_EVENT";
+CREATE DIRECTED EDGE MENTIONS_COMPETITION (FROM Document TO Competition, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_COMP";
+CREATE DIRECTED EDGE MENTIONS_VENUE (FROM Document TO Venue, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_VENUE";
+CREATE DIRECTED EDGE MENTIONS_NATION (FROM Document TO Nation, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_NATION";
+
+// Temporal sequential ordering between competitions (e.g., "immediately before 2016")
+CREATE DIRECTED EDGE PRECEDES (FROM Competition TO Competition) WITH REVERSE_EDGE="SUCCEEDS";
