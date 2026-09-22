@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLLs
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Caches and testing artifacts
+.cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local notes and scratch
+trash/
+MEMORY.md
+LOGS.md
+overview.md
+ps.md
+
+# Large datasets & corpus dumps
+Datasets/corpus/
+
+# Documents
+*.pdf
+*.doc
+*.docx
+*.rtf
+*.odt

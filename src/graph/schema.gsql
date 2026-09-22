@@ -1,0 +1,74 @@
+// ========================================================
+// TigerGraph GSQL Schema for Olympic Corpus (Agentic GraphRAG)
+// ========================================================
+
+CREATE GRAPH OlympicsCorpus ()
+
+USE GRAPH OlympicsCorpus
+
+// --------------------------------------------------------
+// Vertex Definitions
+// --------------------------------------------------------
+CREATE VERTEX Document (
+    PRIMARY_ID doc_id STRING,
+    title STRING,
+    url STRING,
+    wikidata_qid STRING,
+    approx_tokens INT,
+    summary STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX OlympicGame (
+    PRIMARY_ID game_id STRING,  // e.g. "2012 Summer", "2010 Winter"
+    year INT,
+    season STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Sport (
+    PRIMARY_ID sport_id STRING, // e.g. "Canoeing", "Athletics", "Biathlon"
+    name STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Event (
+    PRIMARY_ID event_id STRING, // e.g. "Canoeing at the 2012 Summer Olympics - Men's K-2 1000 metres"
+    name STRING,
+    gender STRING,
+    competitors INT,
+    nations INT,
+    date_held STRING,
+    win_value STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Athlete (
+    PRIMARY_ID athlete_id STRING,
+    name STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Country (
+    PRIMARY_ID noc STRING,      // e.g. "USA", "HUN", "NED", "GER"
+    name STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+CREATE VERTEX Venue (
+    PRIMARY_ID venue_id STRING,
+    name STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE";
+
+// --------------------------------------------------------
+// Edge Definitions (Directed & Undirected Relationships)
+// --------------------------------------------------------
+CREATE DIRECTED EDGE PART_OF_GAME (FROM Event TO OlympicGame);
+CREATE DIRECTED EDGE IN_SPORT (FROM Event TO Sport);
+CREATE DIRECTED EDGE HELD_AT_VENUE (FROM Event TO Venue);
+
+CREATE DIRECTED EDGE WON_GOLD (FROM Athlete TO Event);
+CREATE DIRECTED EDGE WON_SILVER (FROM Athlete TO Event);
+CREATE DIRECTED EDGE WON_BRONZE (FROM Athlete TO Event);
+
+CREATE DIRECTED EDGE REPRESENTS_NOC (FROM Athlete TO Country);
+CREATE DIRECTED EDGE DOCUMENT_COVERS (FROM Document TO Event);
+
+// Temporal Edges for Reasoning Over Time
+CREATE DIRECTED EDGE PREVIOUS_EVENT (FROM Event TO Event);
+CREATE DIRECTED EDGE NEXT_EVENT (FROM Event TO Event);
+CREATE DIRECTED EDGE PRECEDING_GAME (FROM OlympicGame TO OlympicGame);
