@@ -14,8 +14,8 @@ class Settings(BaseSettings):
 
     # TigerGraph Savanna Credentials
     tigergraph_host: str = "https://your-instance.i.tgcloud.io"
-    tigergraph_username: str = "tigergraph"
-    tigergraph_password: str = "tigergraph"
+    tigergraph_username: str = ""
+    tigergraph_password: str = ""
     tigergraph_graph: str = "Olympics"
     tigergraph_secret: str = ""
     tigergraph_token: str = ""

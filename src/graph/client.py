@@ -26,24 +26,47 @@ class TigerGraphManager:
 
             try:
                 import pyTigerGraph as tg
-                is_cloud = "tgcloud.io" in host or "tigergraph.com" in host or True
+                is_cloud = "tgcloud.io" in host or "tigergraph.com" in host
 
-                self._conn = tg.TigerGraphConnection(
-                    host=host,
-                    username=settings.tigergraph_username,
-                    password=settings.tigergraph_password,
-                    graphname=settings.tigergraph_graph,
-                    tgCloud=is_cloud
-                )
+                # Modern Savanna Database Secret authentication:
+                # If secret is provided, pass gsqlSecret. pyTigerGraph sets username="__GSQL__secret"
+                # and uses the secret to authenticate.
+                secret = settings.tigergraph_secret or os.getenv("TIGERGRAPH_SECRET", "")
+                token = settings.tigergraph_token or os.getenv("TIGERGRAPH_TOKEN", "")
 
-                # Auto-authenticate via secret/token if not explicitly provided
-                if settings.tigergraph_secret:
-                    self._conn.getToken(secret=settings.tigergraph_secret)
-                else:
+                conn_kwargs: Dict[str, Any] = {
+                    "host": host,
+                    "graphname": settings.tigergraph_graph,
+                    "tgCloud": is_cloud,
+                }
+                if secret:
+                    conn_kwargs["gsqlSecret"] = secret
+                if token:
+                    conn_kwargs["apiToken"] = token
+
+                # Only include username/password if explicitly provided and not placeholder
+                user = settings.tigergraph_username or os.getenv("TIGERGRAPH_USERNAME", "")
+                pwd = settings.tigergraph_password or os.getenv("TIGERGRAPH_PASSWORD", "")
+                if user and user not in ["", "tigergraph"] or not secret:
+                    if user:
+                        conn_kwargs["username"] = user
+                if pwd and pwd not in ["", "your_password_here"] or not secret:
+                    if pwd:
+                        conn_kwargs["password"] = pwd
+
+                self._conn = tg.TigerGraphConnection(**conn_kwargs)
+
+                # Acquire / refresh RESTPP token if secret is provided and apiToken is not set
+                if secret and not self._conn.apiToken:
                     try:
-                        secret = self._conn.createSecret()
-                        if secret:
-                            self._conn.getToken(secret=secret)
+                        self._conn.getToken(secret=secret)
+                    except Exception as tok_err:
+                        logger.warning(f"Could not retrieve token using secret: {tok_err}")
+                elif not secret and not token:
+                    try:
+                        auto_secret = self._conn.createSecret()
+                        if auto_secret:
+                            self._conn.getToken(secret=auto_secret)
                     except Exception as sec_err:
                         logger.debug(f"Secret generation notice: {sec_err}")
 
@@ -54,11 +77,22 @@ class TigerGraphManager:
         return self._conn
 
     def is_connected(self) -> bool:
-        """Pings the TigerGraph instance to verify connectivity."""
+        """Pings or echoes the TigerGraph instance to verify connectivity."""
         try:
             conn = self.get_connection()
             if conn:
-                return bool(conn.ping())
+                try:
+                    res = conn.ping()
+                    if res and not res.get("error", False):
+                        return True
+                except Exception:
+                    pass
+                try:
+                    echo_res = conn.echo()
+                    if echo_res and "hello" in str(echo_res).lower():
+                        return True
+                except Exception:
+                    pass
         except Exception:
             return False
         return False
@@ -179,3 +213,39 @@ class TigerGraphManager:
 
 
 graph_manager = TigerGraphManager()
+tg_manager = graph_manager
+
+
+if __name__ == "__main__":
+    import sys
+    print("Testing connection to TigerGraph Savanna...")
+    host = settings.tigergraph_host or os.getenv("TIGERGRAPH_HOST", "")
+    graph = settings.tigergraph_graph or os.getenv("TIGERGRAPH_GRAPH", "")
+    secret = settings.tigergraph_secret or os.getenv("TIGERGRAPH_SECRET", "")
+    masked_secret = (secret[:4] + "..." + secret[-4:]) if len(secret) > 8 else ("Set" if secret else "Not set")
+
+    print(f"Host: {host}")
+    print(f"Graph: {graph}")
+    print(f"Database Secret: {masked_secret}")
+
+    conn = graph_manager.get_connection()
+    if not conn:
+        print("Result: Failed to create connection object.")
+        sys.exit(1)
+
+    connected = graph_manager.is_connected()
+    print(f"Connected: {connected}")
+
+    try:
+        echo_res = conn.echo()
+        print(f"Echo response: {echo_res}")
+    except Exception as e:
+        print(f"Echo status: {e}")
+
+    try:
+        schema = graph_manager.get_schema()
+        v_types = list(schema.get("VertexTypes", {}).keys()) if isinstance(schema.get("VertexTypes"), dict) else [v.get("Name") for v in schema.get("vertices", [])]
+        e_types = list(schema.get("EdgeTypes", {}).keys()) if isinstance(schema.get("EdgeTypes"), dict) else [e.get("Name") for e in schema.get("edges", [])]
+        print(f"Schema fetched: {len(v_types)} vertices ({v_types}), {len(e_types)} edges ({e_types})")
+    except Exception as e:
+        print(f"Schema fetch status: {e}")
