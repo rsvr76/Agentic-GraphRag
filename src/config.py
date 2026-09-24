@@ -23,9 +23,9 @@ class Settings(BaseSettings):
     # LLM Providers (Groq primary, Gemini fallback)
     groq_api_key: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.6-flash"
 
     # Default LLM Provider selection
     primary_llm_provider: Literal["groq", "gemini"] = "groq"
