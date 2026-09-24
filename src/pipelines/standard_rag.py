@@ -138,6 +138,23 @@ class StandardRAGPipeline:
         # 5. Calculate Exact Match
         acc = calculate_exact_match(response.content, ground_truth)
 
+        # 6. Build execution trace
+        trace = {
+            "strategy": "dense_vector_search",
+            "model": "sentence-transformers/all-MiniLM-L6-v2 (FastEmbed ONNX)",
+            "top_k": len(retrieved_chunks),
+            "retrieved_chunks": [
+                {
+                    "chunk_id": c["chunk_id"],
+                    "doc_id": c["doc_id"],
+                    "title": c.get("title", ""),
+                    "score": round(float(c.get("score", 0.0)), 4)
+                }
+                for c in retrieved_chunks
+            ],
+            "context_length_chars": len(context_text)
+        }
+
         return PipelineResult(
             pipeline_name=self.name,
             question_id=qid,
@@ -153,5 +170,6 @@ class StandardRAGPipeline:
             total_tokens=response.total_tokens,
             latency_seconds=round(latency, 3),
             accuracy_score=acc,
-            completeness_score=acc
+            completeness_score=acc,
+            execution_trace=trace
         )

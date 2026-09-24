@@ -22,6 +22,7 @@ class PipelineResult(BaseModel):
     latency_seconds: float = 0.0
     accuracy_score: float = 0.0
     completeness_score: float = 0.0
+    execution_trace: Optional[Dict[str, Any]] = None
 
 
 import unicodedata
@@ -31,6 +32,11 @@ import re
 def normalize_text(s: str) -> str:
     """Normalizes text for evaluation: NFKC unicode, lowercase, collapses spaces and strips markdown."""
     s = unicodedata.normalize("NFKC", str(s))
+    # Normalize typographic curly apostrophes and quotation marks to standard ASCII
+    s = s.replace("\u2019", "'").replace("\u2018", "'").replace("`", "'")
+    s = s.replace("\u201c", '"').replace("\u201d", '"')
+    # Normalize dashes (en-dash, em-dash, minus) to standard hyphen
+    s = s.replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-")
     s = s.lower()
     # Remove markdown bold/italic markers
     s = re.sub(r"[*_~`]+", " ", s)
@@ -74,11 +80,27 @@ def calculate_exact_match(prediction: str, ground_truth: List[str]) -> float:
         if gold_clean in pred_clean:
             return 1.0
 
+        # Space-stripped containment for concatenated names (e.g. "Dani KingLaura TrottJoanna Rowsell")
+        gold_no_space = gold_clean.replace(" ", "")
+        pred_no_space = pred_clean.replace(" ", "")
+        if gold_no_space and gold_no_space in pred_no_space:
+            return 1.0
+
         # Word set containment for multi-token entities (e.g. "Chen Ding")
         gold_words = set(gold_clean.split())
         pred_words = set(pred_clean.split())
         if gold_words and gold_words.issubset(pred_words):
             return 1.0
+
+        # CamelCase team-name split for concatenated athlete strings
+        # e.g. "Dani KingLaura TrottJoanna Rowsell" -> ["dani", "king", "laura", "trott", "joanna", "rowsell"]
+        # The gold string has no separator at last-name/first-name boundaries between team members.
+        raw_gold = str(gold)
+        camel_tokens = re.findall(r"[A-Z][a-z]+|[a-z]+", raw_gold)
+        if len(camel_tokens) >= 4:
+            camel_lower = {t.lower() for t in camel_tokens}
+            if camel_lower and camel_lower.issubset(pred_words):
+                return 1.0
 
     return 0.0
 

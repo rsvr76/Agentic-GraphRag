@@ -127,6 +127,30 @@ def parse_document(raw_doc: Dict[str, Any]) -> ParsedEventDocument:
     )
 
 
+def _normalize_athlete_name(name: str) -> str:
+    """Normalize team athlete strings stored as concatenated camelCase.
+
+    Wikipedia infoboxes for team events concatenate athlete names without
+    any separator, e.g. "Dani KingLaura TrottJoanna Rowsell". This detects
+    such strings by the presence of a lowercase-to-uppercase boundary and
+    splits them into comma-separated individual names:
+    "Dani King, Laura Trott, Joanna Rowsell".
+
+    Single-athlete names pass through unchanged.
+    """
+    if not name or not re.search(r"[a-z][A-Z]", name):
+        return name
+    tokens = re.findall(r"[A-Z][a-z]+(?:\s+[a-z]+)*", name)
+    names = []
+    i = 0
+    while i < len(tokens) - 1:
+        names.append(f"{tokens[i]} {tokens[i+1]}")
+        i += 2
+    if i < len(tokens):
+        names.append(tokens[i])
+    return ", ".join(names) if names else name
+
+
 def extract_graph_dataframes(docs: List[ParsedEventDocument]) -> Dict[str, pd.DataFrame]:
     """Converts a collection of parsed documents into relational DataFrames ready for TigerGraph batch upsert."""
     doc_records = []
@@ -204,9 +228,9 @@ def extract_graph_dataframes(docs: List[ParsedEventDocument]) -> Dict[str, pd.Da
 
         for medal_type, ath_name, noc in medal_tuples:
             if ath_name:
-                ath_id = ath_name.strip()
+                ath_id = _normalize_athlete_name(ath_name.strip())
                 if ath_id not in athlete_records:
-                    athlete_records[ath_id] = {"athlete_id": ath_id, "name": ath_name}
+                    athlete_records[ath_id] = {"athlete_id": ath_id, "name": ath_id}
 
                 edge_won_medal.append({
                     "from_id": ath_id,

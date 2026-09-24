@@ -355,6 +355,17 @@ class GraphRAGPipeline:
         # 8. Compute Exact Match
         acc = calculate_exact_match(response.content, ground_truth)
 
+        # 9. Build execution trace
+        trace = {
+            "strategy": "entity_linking_and_static_traversal",
+            "linked_entities": [f"{vtype}:{vid}" for vtype, vlist in linked.items() for vid in vlist],
+            "triples_count": len(triples),
+            "triples_sample": triples[:5],
+            "supporting_chunks_count": len(supporting_chunks),
+            "supporting_chunk_ids": [c.get("chunk_id", "") for c in supporting_chunks],
+            "graph_evidence_length_chars": len(graph_section)
+        }
+
         return PipelineResult(
             pipeline_name=self.name,
             question_id=qid,
@@ -370,5 +381,6 @@ class GraphRAGPipeline:
             total_tokens=response.total_tokens,
             latency_seconds=round(latency, 3),
             accuracy_score=acc,
-            completeness_score=acc
+            completeness_score=acc,
+            execution_trace=trace
         )
