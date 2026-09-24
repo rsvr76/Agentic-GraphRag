@@ -224,9 +224,9 @@ def extract_graph_dataframes(docs: List[ParsedEventDocument]) -> Dict[str, pd.Da
 
     # Fixed medal records
     medal_records = [
-        {"medal_id": "gold", "type": "gold"},
-        {"medal_id": "silver", "type": "silver"},
-        {"medal_id": "bronze", "type": "bronze"}
+        {"medal_id": "gold", "type": "gold", "medal_type": "gold"},
+        {"medal_id": "silver", "type": "silver", "medal_type": "silver"},
+        {"medal_id": "bronze", "type": "bronze", "medal_type": "bronze"}
     ]
 
     return {

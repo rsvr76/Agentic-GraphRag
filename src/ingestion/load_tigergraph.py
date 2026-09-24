@@ -41,7 +41,8 @@ def derive_precedes_edges(df_comp: pd.DataFrame) -> pd.DataFrame:
 def load_corpus_into_tigergraph(
     corpus_path: str = "Datasets/corpus/corpus.jsonl",
     limit: Optional[int] = None,
-    batch_size: int = 500
+    batch_size: int = 500,
+    target_doc_ids: Optional[set] = None
 ) -> Dict[str, int]:
     """Streams corpus documents, extracts graph tables, and bulk loads into TigerGraph Savanna."""
     conn = graph_manager.get_connection()
@@ -49,11 +50,13 @@ def load_corpus_into_tigergraph(
         logger.error("Cannot load data: Not connected to TigerGraph Savanna. Please configure .env.")
         return {}
 
-    logger.info(f"Streaming corpus documents from {corpus_path} (limit={limit})...")
+    logger.info(f"Streaming corpus documents from {corpus_path} (limit={limit}, target_docs={len(target_doc_ids) if target_doc_ids else 'all'})...")
     docs = []
     for idx, doc in enumerate(stream_corpus(corpus_path)):
+        if target_doc_ids and doc.doc_id not in target_doc_ids:
+            continue
         docs.append(doc)
-        if limit and (idx + 1) >= limit:
+        if limit and len(docs) >= limit:
             break
 
     logger.info(f"Extracting graph DataFrames for {len(docs)} documents...")
@@ -74,7 +77,7 @@ def load_corpus_into_tigergraph(
         ("Venue", "venue_id", {"name": "name"}),
         ("Event", "event_id", {"name": "name", "sport": "sport", "competitors": "competitors", "nations": "nations"}),
         ("Athlete", "athlete_id", {"name": "name"}),
-        ("Medal", "medal_id", {"type": "type"}),
+        ("Medal", "medal_id", {"medal_type": "medal_type"}),
         ("Nation", "nation_id", {"name": "name", "noc_code": "noc_code"}),
         ("Date", "date_id", {"date_str": "date_str", "year": "year"})
     ]
@@ -125,8 +128,20 @@ def load_corpus_into_tigergraph(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load Olympic corpus into TigerGraph Savanna")
-    parser.add_argument("--limit", type=int, default=15, help="Number of documents to test (default 15 for spot check)")
+    parser.add_argument("--limit", type=int, default=None, help="Number of documents to test")
+    parser.add_argument("--checkpoint-questions", type=int, default=None, help="Load gold documents for first N checkpoint questions")
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size (max 500)")
     args = parser.parse_args()
 
-    load_corpus_into_tigergraph(limit=args.limit, batch_size=args.batch_size)
+    targets = None
+    if args.checkpoint_questions:
+        targets = set()
+        with open("Datasets/questions/eval_public.jsonl", "r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if i >= args.checkpoint_questions:
+                    break
+                data = json.loads(line)
+                targets.update(data.get("gold_doc_ids", []))
+        print(f"Extracted {len(targets)} unique gold doc IDs for first {args.checkpoint_questions} questions.")
+
+    load_corpus_into_tigergraph(limit=args.limit, batch_size=args.batch_size, target_doc_ids=targets)

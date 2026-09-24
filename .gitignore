@@ -47,6 +47,7 @@ data/processed/*.parquet
 
 # Documents
 *.md
+!MANIFEST.json
 *.pdf
 *.doc
 *.docx

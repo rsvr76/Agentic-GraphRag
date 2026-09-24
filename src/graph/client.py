@@ -244,8 +244,10 @@ if __name__ == "__main__":
 
     try:
         schema = graph_manager.get_schema()
-        v_types = list(schema.get("VertexTypes", {}).keys()) if isinstance(schema.get("VertexTypes"), dict) else [v.get("Name") for v in schema.get("vertices", [])]
-        e_types = list(schema.get("EdgeTypes", {}).keys()) if isinstance(schema.get("EdgeTypes"), dict) else [e.get("Name") for e in schema.get("edges", [])]
+        raw_v = schema.get("VertexTypes", schema.get("vertices", []))
+        raw_e = schema.get("EdgeTypes", schema.get("edges", []))
+        v_types = list(raw_v.keys()) if isinstance(raw_v, dict) else [v.get("Name") for v in raw_v]
+        e_types = list(raw_e.keys()) if isinstance(raw_e, dict) else [e.get("Name") for e in raw_e]
         print(f"Schema fetched: {len(v_types)} vertices ({v_types}), {len(e_types)} edges ({e_types})")
     except Exception as e:
         print(f"Schema fetch status: {e}")
