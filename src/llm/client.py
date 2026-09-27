@@ -172,58 +172,64 @@ class UnifiedLLMClient:
             return None
 
         active_model = (model or settings.gemini_model).strip()
+        candidate_models = [active_model]
+        for m_fallback in ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]:
+            if m_fallback not in candidate_models:
+                candidate_models.append(m_fallback)
+
         total_keys = len(gemini_keys)
 
-        # Try keys starting from the current active index
-        for offset in range(total_keys):
-            idx = (self._gemini_active_idx + offset) % total_keys
-            key = gemini_keys[idx]
-            client = self._get_gemini_client(key)
-            if not client:
-                continue
+        # Try prioritized model first across keys before falling back to lite models
+        for target_model in candidate_models:
+            for offset in range(total_keys):
+                idx = (self._gemini_active_idx + offset) % total_keys
+                key = gemini_keys[idx]
+                client = self._get_gemini_client(key)
+                if not client:
+                    continue
 
-            try:
-                if hasattr(client, "models"):
-                    config = {"temperature": temperature}
-                    if system_instruction:
-                        config["system_instruction"] = system_instruction
-                    response = client.models.generate_content(
-                        model=active_model,
-                        contents=prompt,
-                        config=config
-                    )
-                    usage = getattr(response, "usage_metadata", None)
-                    p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
-                    c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
-                    self._gemini_active_idx = idx
-                    return LLMResponse(
-                        content=response.text or "",
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        total_tokens=p_tok + c_tok,
-                        model=active_model,
-                        provider=f"gemini_key_{idx+1}"
-                    )
-                else:
-                    gen_model = client.GenerativeModel(
-                        model_name=active_model,
-                        system_instruction=system_instruction
-                    )
-                    response = gen_model.generate_content(prompt)
-                    usage = getattr(response, "usage_metadata", None)
-                    p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
-                    c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
-                    self._gemini_active_idx = idx
-                    return LLMResponse(
-                        content=response.text or "",
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        total_tokens=p_tok + c_tok,
-                        model=active_model,
-                        provider=f"gemini_key_{idx+1}"
-                    )
-            except Exception as e:
-                logger.warning(f"Gemini API key #{idx+1} failed ({e}). Rotating to next key.")
+                try:
+                    if hasattr(client, "models"):
+                        config = {"temperature": temperature}
+                        if system_instruction:
+                            config["system_instruction"] = system_instruction
+                        response = client.models.generate_content(
+                            model=target_model,
+                            contents=prompt,
+                            config=config
+                        )
+                        usage = getattr(response, "usage_metadata", None)
+                        p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
+                        c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
+                        self._gemini_active_idx = idx
+                        return LLMResponse(
+                            content=response.text or "",
+                            prompt_tokens=p_tok,
+                            completion_tokens=c_tok,
+                            total_tokens=p_tok + c_tok,
+                            model=target_model,
+                            provider=f"gemini_key_{idx+1}"
+                        )
+                    else:
+                        gen_model = client.GenerativeModel(
+                            model_name=target_model,
+                            system_instruction=system_instruction
+                        )
+                        response = gen_model.generate_content(prompt)
+                        usage = getattr(response, "usage_metadata", None)
+                        p_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
+                        c_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
+                        self._gemini_active_idx = idx
+                        return LLMResponse(
+                            content=response.text or "",
+                            prompt_tokens=p_tok,
+                            completion_tokens=c_tok,
+                            total_tokens=p_tok + c_tok,
+                            model=target_model,
+                            provider=f"gemini_key_{idx+1}"
+                        )
+                except Exception as e:
+                    logger.debug(f"Gemini API key #{idx+1} with {target_model} failed ({e}). Trying next key/model.")
 
         return None
 

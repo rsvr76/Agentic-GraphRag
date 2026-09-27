@@ -46,34 +46,61 @@ class BenchmarkRunner:
         else:
             raise ValueError(f"Unknown pipeline: {name}")
 
-    def load_questions(self, limit: Optional[int] = None) -> List[Dict]:
+    def load_questions(self, limit: Optional[int] = None, offset: int = 0) -> List[Dict]:
         questions = []
         with open(self.eval_file, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip():
                     questions.append(json.loads(line))
-                    if limit and len(questions) >= limit:
-                        break
+        if offset > 0:
+            questions = questions[offset:]
+        if limit is not None:
+            questions = questions[:limit]
         return questions
 
     def run_benchmark(
         self,
-        sample_size: int = 15,
+        sample_size: Optional[int] = None,
+        offset: int = 0,
         pipeline_names: Optional[List[str]] = None,
         output_file: Optional[str] = "data/processed/results_checkpoint.jsonl",
+        master_output_file: Optional[str] = None,
         report_file: Optional[str] = "data/processed/agent_execution_traces.md",
         delay_seconds: float = 2.0
     ) -> Dict[str, Dict]:
         selected_pipelines = pipeline_names or ["standard_rag", "graph_rag"]
-        questions = self.load_questions(limit=sample_size)
-        print(f"Loaded {len(questions)} evaluation questions for benchmark evaluation.")
+        questions = self.load_questions(limit=sample_size, offset=offset)
+        print(f"Loaded {len(questions)} evaluation questions (offset={offset}, limit={sample_size}) for benchmark evaluation.")
         print(f"Active pipelines: {', '.join(selected_pipelines)}")
-        print(f"Output destination: {output_file}")
+        print(f"Batch output destination: {output_file}")
+        if master_output_file:
+            print(f"Master output destination: {master_output_file}")
 
         if output_file:
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        if master_output_file:
+            os.makedirs(os.path.dirname(master_output_file), exist_ok=True)
 
         results_by_pipeline: Dict[str, List[PipelineResult]] = {name: [] for name in selected_pipelines}
+
+        # If resuming, load existing results from output_file
+        completed_keys = set()
+        if output_file and os.path.exists(output_file):
+            try:
+                with open(output_file, "r", encoding="utf-8") as f_prev:
+                    for line in f_prev:
+                        if line.strip():
+                            prev_res = PipelineResult.model_validate_json(line)
+                            p_key = (prev_res.question_id, prev_res.pipeline_name.lower().replace(" ", "_"))
+                            completed_keys.add(p_key)
+                            # Also map to p_name
+                            for name in selected_pipelines:
+                                if name in prev_res.pipeline_name.lower().replace(" ", "_") or prev_res.pipeline_name.lower().replace(" ", "_") in name:
+                                    results_by_pipeline[name].append(prev_res)
+                if completed_keys:
+                    print(f"Resuming evaluation: found {len(completed_keys)} already completed results. Skipping them.", flush=True)
+            except Exception as e:
+                print(f"Warning reading existing results for resume: {e}", flush=True)
 
         for idx, q in enumerate(questions):
             qid = q.get("qid", f"q-{idx+1}")
@@ -82,12 +109,21 @@ class BenchmarkRunner:
             gold_answers = q.get("answer", [])
             gold_docs = q.get("gold_doc_ids", [])
 
-            print(f"\n[{idx+1}/{len(questions)}] ({qtype}) {qid}: {query[:75]}...")
-            print(f"   Ground Truth: {gold_answers}")
+            # Check if all selected pipelines are already completed for this question
+            if all((qid, p_name) in completed_keys for p_name in selected_pipelines):
+                continue
+
+            print(f"\n[{idx+1}/{len(questions)}] ({qtype}) {qid}: {query[:75]}...", flush=True)
+            print(f"   Ground Truth: {gold_answers}", flush=True)
 
             for p_name in selected_pipelines:
                 pipe = self._get_pipeline(p_name)
-                print(f"   Running {pipe.name}...")
+                norm_pipe_name = pipe.name.lower().replace(" ", "_")
+                if (qid, p_name) in completed_keys or (qid, norm_pipe_name) in completed_keys:
+                    print(f"   [{pipe.name}] Already evaluated. Skipping.", flush=True)
+                    continue
+
+                print(f"   Running {pipe.name}...", flush=True)
                 result = pipe.run(
                     qid=qid,
                     question=query,
@@ -96,40 +132,54 @@ class BenchmarkRunner:
                     qtype=qtype
                 )
                 results_by_pipeline[p_name].append(result)
-                print(f"   [{pipe.name}] Acc: {result.accuracy_score:.1f} | Tokens: {result.total_tokens} | Latency: {result.latency_seconds:.2f}s")
-                print(f"   Pred: {result.prediction[:100]}...")
+                print(f"   [{pipe.name}] Acc: {result.accuracy_score:.1f} | Tokens: {result.total_tokens} | Latency: {result.latency_seconds:.2f}s", flush=True)
+                print(f"   Pred: {result.prediction[:100]}...", flush=True)
 
-                # Append result to output file immediately
+                # Append result to batch output file immediately
                 if output_file:
                     with open(output_file, "a", encoding="utf-8") as f_out:
                         f_out.write(result.model_dump_json() + "\n")
 
+                # Also append to master benchmark output file
+                if master_output_file and master_output_file != output_file:
+                    with open(master_output_file, "a", encoding="utf-8") as f_master:
+                        f_master.write(result.model_dump_json() + "\n")
+
                 if delay_seconds > 0:
                     time.sleep(delay_seconds)
 
+        # Check if dataset contains ground-truth answers (visible vs. held-out hidden)
+        has_ground_truth = any(len(q.get("answer", [])) > 0 for q in questions)
+
         # Print overall summary table
-        print("\n========================================================")
-        print("OVERALL BENCHMARK COMPARISON")
-        print("========================================================")
-        header = f"{'Pipeline':<20} | {'Count':<6} | {'Accuracy':<10} | {'Avg Tokens':<12} | {'Avg Latency (s)':<15}"
-        print(header)
-        print("-" * len(header))
+        print("\n========================================================", flush=True)
+        print("OVERALL BENCHMARK COMPARISON" if has_ground_truth else "OVERALL BENCHMARK RAW OUTPUTS (HELD-OUT EVALUATION)", flush=True)
+        print("========================================================", flush=True)
+        if has_ground_truth:
+            header = f"{'Pipeline':<20} | {'Count':<6} | {'Accuracy':<10} | {'Avg Tokens':<12} | {'Avg Latency (s)':<15}"
+        else:
+            header = f"{'Pipeline':<20} | {'Count':<6} | {'Avg Tokens':<12} | {'Avg Latency (s)':<15}"
+        print(header, flush=True)
+        print("-" * len(header), flush=True)
 
         summary = {}
         for p_name, p_results in results_by_pipeline.items():
             stats = calculate_token_stats(p_results)
             summary[p_name] = stats
             pipe_display = p_results[0].pipeline_name if p_results else p_name
-            print(f"{pipe_display:<20} | {stats['sample_count']:<6} | {stats['accuracy']*100:>8.1f}% | {stats['avg_tokens_per_query']:>12.1f} | {stats.get('avg_latency_seconds', 0.0):>15.2f}")
+            if has_ground_truth:
+                print(f"{pipe_display:<20} | {stats['sample_count']:<6} | {stats['accuracy']*100:>8.1f}% | {stats['avg_tokens_per_query']:>12.1f} | {stats.get('avg_latency_seconds', 0.0):>15.2f}", flush=True)
+            else:
+                print(f"{pipe_display:<20} | {stats['sample_count']:<6} | {stats['avg_tokens_per_query']:>12.1f} | {stats.get('avg_latency_seconds', 0.0):>15.2f}", flush=True)
 
         # Print archetype breakdown
-        print("\n========================================================")
-        print("PER-ARCHETYPE ACCURACY BREAKDOWN")
-        print("========================================================")
+        print("\n========================================================", flush=True)
+        print("PER-ARCHETYPE ACCURACY BREAKDOWN" if has_ground_truth else "PER-ARCHETYPE QUESTION DISTRIBUTION", flush=True)
+        print("========================================================", flush=True)
         all_archetypes = sorted(list(set(q.get("qtype", "unknown") for q in questions)))
         arch_header = f"{'Archetype':<15} | {'Count':<6} | " + " | ".join([f"{p_name:<16}" for p_name in selected_pipelines])
-        print(arch_header)
-        print("-" * len(arch_header))
+        print(arch_header, flush=True)
+        print("-" * len(arch_header), flush=True)
 
         breakdowns = {p_name: calculate_archetype_breakdown(p_results) for p_name, p_results in results_by_pipeline.items()}
 
@@ -138,9 +188,13 @@ class BenchmarkRunner:
             row_items = [f"{arch:<15}", f"{arch_count:<6}"]
             for p_name in selected_pipelines:
                 arch_stat = breakdowns[p_name].get(arch, {})
-                acc_val = arch_stat.get("accuracy", 0.0) * 100
-                row_items.append(f"{acc_val:>14.1f}%")
-            print(" | ".join(row_items))
+                if has_ground_truth:
+                    acc_val = arch_stat.get("accuracy", 0.0) * 100
+                    row_items.append(f"{acc_val:>14.1f}%")
+                else:
+                    tok_val = arch_stat.get("avg_tokens", 0.0)
+                    row_items.append(f"{tok_val:>14.1f} tok")
+            print(" | ".join(row_items), flush=True)
 
         if report_file:
             self.generate_trace_report(
@@ -220,7 +274,10 @@ class BenchmarkRunner:
             lines.append("")
             lines.append(f"- Query: \"{query}\"")
             lines.append(f"- Archetype: `{qtype}`")
-            lines.append(f"- Ground Truth: `{gold_answers}`")
+            if gold_answers:
+                lines.append(f"- Ground Truth: `{gold_answers}`")
+            else:
+                lines.append("- Ground Truth: Held-Out Ground Truth (Official Judging)")
             lines.append("")
 
             for p_name in selected_pipelines:
@@ -230,7 +287,10 @@ class BenchmarkRunner:
                 r = p_results[idx]
                 trace = r.execution_trace or {}
 
-                status = "Correct (1.0)" if r.accuracy_score == 1.0 else "Incorrect (0.0)"
+                if gold_answers:
+                    status = "Correct (1.0)" if r.accuracy_score == 1.0 else "Incorrect (0.0)"
+                else:
+                    status = "Raw Output Logged (Held-Out Benchmark Set)"
                 lines.append(f"#### {r.pipeline_name}")
                 lines.append("")
                 lines.append(f"- Evaluation Status: {status}")
@@ -308,23 +368,45 @@ class BenchmarkRunner:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run benchmark comparison across RAG pipelines")
-    parser.add_argument("--limit", type=int, default=15, help="Number of questions to evaluate (default: 15)")
+    parser.add_argument("--input", type=str, default="Datasets/questions/eval_public.jsonl", help="Evaluation questions JSONL file")
+    parser.add_argument("--limit", type=int, default=None, help="Number of questions to evaluate")
+    parser.add_argument("--batch", type=int, default=None, help="Batch index (1 to 10) to run 10 questions per batch")
+    parser.add_argument("--batch-size", type=int, default=10, help="Questions per batch (default: 10)")
     parser.add_argument("--pipelines", nargs="+", default=["standard_rag", "graph_rag", "agentic_graphrag"], help="Pipelines to test: standard_rag, graph_rag, agentic_graphrag")
-    parser.add_argument("--output", type=str, default="data/processed/results_checkpoint.jsonl", help="Output JSONL destination")
+    parser.add_argument("--output", type=str, default="data/processed/results_benchmark.jsonl", help="Master output JSONL destination")
     parser.add_argument("--report", type=str, default="data/processed/agent_execution_traces.md", help="Markdown execution traces report destination")
-    parser.add_argument("--delay", type=float, default=2.5, help="Delay in seconds between LLM calls to prevent rate limits")
+    parser.add_argument("--delay", type=float, default=2.0, help="Delay in seconds between LLM calls to prevent rate limits")
+    parser.add_argument("--resume", action="store_true", help="Resume from existing results file without re-evaluating completed questions")
     args = parser.parse_args()
 
-    # Clear previous results file if running fresh
-    if os.path.exists(args.output):
-        os.remove(args.output)
+    offset = 0
+    limit = args.limit
+    output_file = args.output
+    report_file = args.report
+    master_file = args.output
 
-    runner = BenchmarkRunner()
+    if args.batch is not None:
+        b_idx = args.batch
+        bsize = args.batch_size
+        offset = (b_idx - 1) * bsize
+        limit = bsize
+        os.makedirs("data/processed/batches", exist_ok=True)
+        output_file = f"data/processed/batches/batch_{b_idx:02d}_results.jsonl"
+        report_file = f"data/processed/batches/batch_{b_idx:02d}_traces.md"
+        if not args.resume and os.path.exists(output_file):
+            os.remove(output_file)
+    else:
+        if not args.resume and os.path.exists(args.output):
+            os.remove(args.output)
+
+    runner = BenchmarkRunner(eval_file=args.input)
     runner.run_benchmark(
-        sample_size=args.limit,
+        sample_size=limit,
+        offset=offset,
         pipeline_names=args.pipelines,
-        output_file=args.output,
-        report_file=args.report,
+        output_file=output_file,
+        master_output_file=master_file,
+        report_file=report_file,
         delay_seconds=args.delay
     )
 

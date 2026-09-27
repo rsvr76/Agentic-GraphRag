@@ -24,8 +24,8 @@ from src.evaluation.metrics import PipelineResult, calculate_exact_match
 class StandardRAGPipeline:
     def __init__(
         self,
-        embeddings_npz: str = "data/processed/checkpoint_embeddings.npz",
-        chunks_jsonl: str = "data/processed/checkpoint_chunks.jsonl",
+        embeddings_npz: str = "data/processed/chunk_embeddings.npz",
+        chunks_jsonl: str = "data/processed/chunks.jsonl",
         top_k: int = 5
     ):
         self.name = "Standard RAG"

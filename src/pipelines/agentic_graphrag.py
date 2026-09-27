@@ -49,8 +49,8 @@ class AgentState(TypedDict):
 class AgenticGraphRAGPipeline:
     def __init__(
         self,
-        chunks_jsonl: str = "data/processed/checkpoint_chunks.jsonl",
-        embeddings_npz: str = "data/processed/checkpoint_embeddings.npz",
+        chunks_jsonl: str = "data/processed/chunks.jsonl",
+        embeddings_npz: str = "data/processed/chunk_embeddings.npz",
         max_iterations: int = 6
     ):
         self.name = "Agentic GraphRAG"
@@ -105,13 +105,13 @@ class AgenticGraphRAGPipeline:
         if not self.conn:
             return
         try:
-            comps = self.conn.getVertices("Competition")
+            comps = self.conn.getVertices("Competition", limit=100000)
             self.competitions = {c["v_id"]: c.get("attributes", {}) for c in comps}
-            venues = self.conn.getVertices("Venue")
+            venues = self.conn.getVertices("Venue", limit=100000)
             self.venues = {v["v_id"]: v.get("attributes", {}) for v in venues}
-            events = self.conn.getVertices("Event")
+            events = self.conn.getVertices("Event", limit=100000)
             self.events = {e["v_id"]: e.get("attributes", {}) for e in events}
-            athletes = self.conn.getVertices("Athlete")
+            athletes = self.conn.getVertices("Athlete", limit=100000)
             self.athletes = {a["v_id"]: a.get("attributes", {}) for a in athletes}
         except Exception as e:
             print(f"Warning: Failed to cache graph entities: {e}")
