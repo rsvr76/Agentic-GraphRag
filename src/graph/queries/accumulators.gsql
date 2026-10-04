@@ -1,14 +1,6 @@
-// ========================================================
-// Parameterized GSQL Queries for Agentic GraphRAG Archetypes
-// Aligned with Final Plan (v3) Section 6 & 10.2
-// ========================================================
 
 USE GRAPH Olympics
 
-// --------------------------------------------------------
-// 1. Aggregation Query: Count Events with Competitors > Threshold
-// Answers queries like: "how many shooting events at 2004 Summer Olympics had more than 37 competitors?"
-// --------------------------------------------------------
 CREATE QUERY count_events_by_competitors(STRING sport_name, STRING comp_id, INT min_competitors) FOR GRAPH Olympics {
     SumAccum<INT> @@event_count = 0;
     
@@ -22,11 +14,6 @@ CREATE QUERY count_events_by_competitors(STRING sport_name, STRING comp_id, INT 
     PRINT @@event_count AS result_count;
 }
 
-// --------------------------------------------------------
-// 2. Superlative Query: Event with Highest Competitors
-// Answers queries like: "which sailing event at 2000 Summer Olympics had highest number of competitors?"
-// Uses HeapAccum(1) to find exact superlative directly in TigerGraph
-// --------------------------------------------------------
 TYPEDEF TUPLE<STRING event_name, INT competitors> EventRankTuple;
 
 CREATE QUERY superlative_event_by_competitors(STRING sport_name, STRING comp_id, BOOL find_max) FOR GRAPH Olympics {
@@ -52,10 +39,6 @@ CREATE QUERY superlative_event_by_competitors(STRING sport_name, STRING comp_id,
     END;
 }
 
-// --------------------------------------------------------
-// 3. Temporal Query: Preceding Competition Events
-// Answers queries like: "Who won gold in men's pole vault at Summer Olympics held immediately before 2016?"
-// --------------------------------------------------------
 CREATE QUERY temporal_preceding_competition(STRING current_comp_id) FOR GRAPH Olympics {
     Comp = {Competition.*};
     TargetComp = SELECT c FROM Comp:c WHERE c.competition_id == current_comp_id;
@@ -65,10 +48,6 @@ CREATE QUERY temporal_preceding_competition(STRING current_comp_id) FOR GRAPH Ol
     PRINT PrecedingComp[PrecedingComp.competition_id, PrecedingComp.year, PrecedingComp.season] AS preceding_competition;
 }
 
-// --------------------------------------------------------
-// 4. Multi-Hop Query: Venue + Date -> Event -> Gold Medalist
-// Answers queries like: "Who won gold in the event held at Venue on Date?"
-// --------------------------------------------------------
 CREATE QUERY find_gold_winner_by_venue_date(STRING venue_name, STRING date_str) FOR GRAPH Olympics {
     Venues = {Venue.*};
     TargetVenue = SELECT v FROM Venues:v WHERE v.name == venue_name OR v.venue_id == venue_name;

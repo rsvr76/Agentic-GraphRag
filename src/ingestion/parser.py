@@ -20,7 +20,6 @@ class ParsedEventDocument(BaseModel):
     approx_tokens: int
     text: str
 
-    # Extracted Infobox Metadata
     sport: Optional[str] = None
     event_name: Optional[str] = None
     games: Optional[str] = None
@@ -31,7 +30,6 @@ class ParsedEventDocument(BaseModel):
     competitors: Optional[int] = None
     nations: Optional[int] = None
 
-    # Winners & Medals
     gold_athlete: Optional[str] = None
     gold_noc: Optional[str] = None
     silver_athlete: Optional[str] = None
@@ -40,7 +38,6 @@ class ParsedEventDocument(BaseModel):
     bronze_noc: Optional[str] = None
     win_value: Optional[str] = None
 
-    # Temporal linkages
     prev_year: Optional[int] = None
     next_year: Optional[int] = None
 
@@ -58,11 +55,9 @@ def parse_document(raw_doc: Dict[str, Any]) -> ParsedEventDocument:
     text = raw_doc.get("text", "")
     title = raw_doc.get("title", "")
 
-    # Extract Sport from Title (e.g., "Canoeing at the 2012 Summer Olympics..." -> "Canoeing")
     sport_match = re.match(r"^([^–\-]+?)\s+at the\s+\d{4}", title)
     sport = sport_match.group(1).strip() if sport_match else None
 
-    # Extract Infobox attributes
     event_name = extract_infobox_field(text, "event") or title
     games = extract_infobox_field(text, "games")
     games_year = None
@@ -219,7 +214,6 @@ def extract_graph_dataframes(docs: List[ParsedEventDocument]) -> Dict[str, pd.Da
                     "day": 0
                 }
 
-        # Process Medals and Athletes
         medal_tuples = [
             ("gold", d.gold_athlete, d.gold_noc),
             ("silver", d.silver_athlete, d.silver_noc),
@@ -246,7 +240,6 @@ def extract_graph_dataframes(docs: List[ParsedEventDocument]) -> Dict[str, pd.Da
                         nation_records[noc] = {"nation_id": noc, "name": noc, "noc_code": noc}
                     edge_represents.append({"from_id": ath_id, "to_id": noc})
 
-    # Fixed medal records
     medal_records = [
         {"medal_id": "gold", "type": "gold", "medal_type": "gold"},
         {"medal_id": "silver", "type": "silver", "medal_type": "silver"},

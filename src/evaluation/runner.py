@@ -83,7 +83,6 @@ class BenchmarkRunner:
 
         results_by_pipeline: Dict[str, List[PipelineResult]] = {name: [] for name in selected_pipelines}
 
-        # If resuming, load existing results from output_file
         completed_keys = set()
         if output_file and os.path.exists(output_file):
             try:
@@ -93,7 +92,6 @@ class BenchmarkRunner:
                             prev_res = PipelineResult.model_validate_json(line)
                             p_key = (prev_res.question_id, prev_res.pipeline_name.lower().replace(" ", "_"))
                             completed_keys.add(p_key)
-                            # Also map to p_name
                             for name in selected_pipelines:
                                 if name in prev_res.pipeline_name.lower().replace(" ", "_") or prev_res.pipeline_name.lower().replace(" ", "_") in name:
                                     results_by_pipeline[name].append(prev_res)
@@ -109,7 +107,6 @@ class BenchmarkRunner:
             gold_answers = q.get("answer", [])
             gold_docs = q.get("gold_doc_ids", [])
 
-            # Check if all selected pipelines are already completed for this question
             if all((qid, p_name) in completed_keys for p_name in selected_pipelines):
                 continue
 
@@ -135,12 +132,10 @@ class BenchmarkRunner:
                 print(f"   [{pipe.name}] Acc: {result.accuracy_score:.1f} | Tokens: {result.total_tokens} | Latency: {result.latency_seconds:.2f}s", flush=True)
                 print(f"   Pred: {result.prediction[:100]}...", flush=True)
 
-                # Append result to batch output file immediately
                 if output_file:
                     with open(output_file, "a", encoding="utf-8") as f_out:
                         f_out.write(result.model_dump_json() + "\n")
 
-                # Also append to master benchmark output file
                 if master_output_file and master_output_file != output_file:
                     with open(master_output_file, "a", encoding="utf-8") as f_master:
                         f_master.write(result.model_dump_json() + "\n")
@@ -148,10 +143,8 @@ class BenchmarkRunner:
                 if delay_seconds > 0:
                     time.sleep(delay_seconds)
 
-        # Check if dataset contains ground-truth answers (visible vs. held-out hidden)
         has_ground_truth = any(len(q.get("answer", [])) > 0 for q in questions)
 
-        # Print overall summary table
         print("\n========================================================", flush=True)
         print("OVERALL BENCHMARK COMPARISON" if has_ground_truth else "OVERALL BENCHMARK RAW OUTPUTS (HELD-OUT EVALUATION)", flush=True)
         print("========================================================", flush=True)
@@ -172,7 +165,6 @@ class BenchmarkRunner:
             else:
                 print(f"{pipe_display:<20} | {stats['sample_count']:<6} | {stats['avg_tokens_per_query']:>12.1f} | {stats.get('avg_latency_seconds', 0.0):>15.2f}", flush=True)
 
-        # Print archetype breakdown
         print("\n========================================================", flush=True)
         print("PER-ARCHETYPE ACCURACY BREAKDOWN" if has_ground_truth else "PER-ARCHETYPE QUESTION DISTRIBUTION", flush=True)
         print("========================================================", flush=True)
@@ -333,7 +325,6 @@ class BenchmarkRunner:
                 lines.append(f"  > \"{r.prediction}\"")
                 lines.append("")
 
-            # Question comparative diagnosis
             lines.append(f"#### Comparative Diagnosis for {qid}")
             lines.append("")
             p1_acc = results_by_pipeline.get("standard_rag", [PipelineResult(pipeline_name="", question_id="", question="", prediction="", ground_truth=[])])[idx].accuracy_score if "standard_rag" in results_by_pipeline else 0.0

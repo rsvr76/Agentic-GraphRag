@@ -15,7 +15,6 @@ class PipelineResult(BaseModel):
     gold_doc_ids: List[str] = []
     cited_chunk_ids: List[str] = []
     
-    # Metrics
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -32,17 +31,12 @@ import re
 def normalize_text(s: str) -> str:
     """Normalizes text for evaluation: NFKC unicode, lowercase, collapses spaces and strips markdown."""
     s = unicodedata.normalize("NFKC", str(s))
-    # Normalize typographic curly apostrophes and quotation marks to standard ASCII
     s = s.replace("\u2019", "'").replace("\u2018", "'").replace("`", "'")
     s = s.replace("\u201c", '"').replace("\u201d", '"')
-    # Normalize dashes (en-dash, em-dash, minus) to standard hyphen
     s = s.replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-")
     s = s.lower()
-    # Remove markdown bold/italic markers
     s = re.sub(r"[*_~`]+", " ", s)
-    # Replace citation brackets and punctuation (except hyphens)
     s = re.sub(r"[\[\]【】\(\)\"\'\:\,\.\;]", " ", s)
-    # Collapse multiple whitespaces
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
@@ -67,7 +61,6 @@ def calculate_exact_match(prediction: str, ground_truth: List[str]) -> float:
         if not gold_clean:
             continue
 
-        # Numeric ground truth: enforce standalone number or written-out number match
         if gold_clean.isdigit():
             if re.search(r"\b" + re.escape(gold_clean) + r"\b", pred_clean):
                 return 1.0
@@ -76,25 +69,19 @@ def calculate_exact_match(prediction: str, ground_truth: List[str]) -> float:
                 return 1.0
             continue
 
-        # Non-numeric string match
         if gold_clean in pred_clean:
             return 1.0
 
-        # Space-stripped containment for concatenated names (e.g. "Dani KingLaura TrottJoanna Rowsell")
         gold_no_space = gold_clean.replace(" ", "")
         pred_no_space = pred_clean.replace(" ", "")
         if gold_no_space and gold_no_space in pred_no_space:
             return 1.0
 
-        # Word set containment for multi-token entities (e.g. "Chen Ding")
         gold_words = set(gold_clean.split())
         pred_words = set(pred_clean.split())
         if gold_words and gold_words.issubset(pred_words):
             return 1.0
 
-        # CamelCase team-name split for concatenated athlete strings
-        # e.g. "Dani KingLaura TrottJoanna Rowsell" -> ["dani", "king", "laura", "trott", "joanna", "rowsell"]
-        # The gold string has no separator at last-name/first-name boundaries between team members.
         raw_gold = str(gold)
         camel_tokens = re.findall(r"[A-Z][a-z]+|[a-z]+", raw_gold)
         if len(camel_tokens) >= 4:

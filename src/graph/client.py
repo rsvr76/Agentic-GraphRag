@@ -28,9 +28,6 @@ class TigerGraphManager:
                 import pyTigerGraph as tg
                 is_cloud = "tgcloud.io" in host or "tigergraph.com" in host
 
-                # Modern Savanna Database Secret authentication:
-                # If secret is provided, pass gsqlSecret. pyTigerGraph sets username="__GSQL__secret"
-                # and uses the secret to authenticate.
                 secret = settings.tigergraph_secret or os.getenv("TIGERGRAPH_SECRET", "")
                 token = settings.tigergraph_token or os.getenv("TIGERGRAPH_TOKEN", "")
 
@@ -44,7 +41,6 @@ class TigerGraphManager:
                 if token:
                     conn_kwargs["apiToken"] = token
 
-                # Only include username/password if explicitly provided and not placeholder
                 user = settings.tigergraph_username or os.getenv("TIGERGRAPH_USERNAME", "")
                 pwd = settings.tigergraph_password or os.getenv("TIGERGRAPH_PASSWORD", "")
                 if user and user not in ["", "tigergraph"] or not secret:
@@ -56,7 +52,6 @@ class TigerGraphManager:
 
                 self._conn = tg.TigerGraphConnection(**conn_kwargs)
 
-                # Acquire / refresh RESTPP token if secret is provided and apiToken is not set
                 if secret and not self._conn.apiToken:
                     try:
                         self._conn.getToken(secret=secret)

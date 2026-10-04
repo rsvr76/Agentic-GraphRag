@@ -36,7 +36,6 @@ class GraphRAGPipeline:
         self.max_triples = max_triples
         self.top_k_chunks = top_k_chunks
         
-        # Fall back to full corpus if checkpoint paths not found
         if not os.path.exists(chunks_jsonl) and os.path.exists("data/processed/chunks.jsonl"):
             chunks_jsonl = "data/processed/chunks.jsonl"
         if not os.path.exists(embeddings_npz) and os.path.exists("data/processed/chunk_embeddings.npz"):
@@ -46,12 +45,10 @@ class GraphRAGPipeline:
         self.title_to_chunks: Dict[str, List[Dict[str, Any]]] = {}
         self._load_chunks(chunks_jsonl)
 
-        # Fallback vector retrieval store
         self.chunk_ids: List[str] = []
         self.embeddings: Optional[np.ndarray] = None
         self._load_vector_store(embeddings_npz)
 
-        # Connect to TigerGraph and cache canonical entities
         self.conn = tg_manager.get_connection()
         self.competitions: Dict[str, Dict[str, Any]] = {}
         self.venues: Dict[str, Dict[str, Any]] = {}
@@ -111,7 +108,6 @@ class GraphRAGPipeline:
         }
         q_lower = question.lower()
 
-        # 1. Temporal Resolution: 'immediately before <year>'
         before_match = re.search(r"immediately before (\d{4})", q_lower)
         if before_match and self.conn:
             anchor_year = before_match.group(1)
@@ -125,23 +121,19 @@ class GraphRAGPipeline:
             except Exception:
                 pass
 
-        # 2. Competitions (e.g. 2018 Winter, 2008 Summer)
         if not linked["Competition"]:
             for c in self.competitions:
                 if c.lower() in q_lower:
                     linked["Competition"].append(c)
 
-        # 3. Venues (e.g. Olympic Weightlifting Gymnasium, London Velopark)
         for v in self.venues:
             if len(v) > 3 and v.lower() in q_lower:
                 linked["Venue"].append(v)
 
-        # 4. Athletes
         for a in self.athletes:
             if len(a) > 4 and a.lower() in q_lower:
                 linked["Athlete"].append(a)
 
-        # 5. Events
         for e in self.events:
             if len(e) > 5 and e.lower() in q_lower:
                 linked["Event"].append(e)
@@ -167,7 +159,6 @@ class GraphRAGPipeline:
 
         heap: List[Tuple[int, str, str]] = []
 
-        # Hop 1: Competitions -> INCLUDES_EVENT -> Event
         for comp in linked.get("Competition", []):
             try:
                 edges = self.conn.getEdges("Competition", comp)
@@ -183,7 +174,6 @@ class GraphRAGPipeline:
             except Exception:
                 pass
 
-        # Hop 1: Venues -> HOSTED_EVENT -> Event
         for venue in linked.get("Venue", []):
             try:
                 edges = self.conn.getEdges("Venue", venue)
@@ -196,7 +186,6 @@ class GraphRAGPipeline:
             except Exception:
                 pass
 
-        # Hop 1: Athletes -> WON_MEDAL, COMPETED_IN
         for ath in linked.get("Athlete", []):
             try:
                 edges = self.conn.getEdges("Athlete", ath)
@@ -211,7 +200,6 @@ class GraphRAGPipeline:
             except Exception:
                 pass
 
-        # Extract top-ranked entities via HeapAccum pattern
         visited_evs = set()
         while heap and len(triples) < self.max_triples:
             neg_score, triple, ev_name = heapq.heappop(heap)
@@ -220,7 +208,6 @@ class GraphRAGPipeline:
                 visited_evs.add(ev_name)
                 selected_events.append(ev_name)
                 
-                # Hop 2: Event -> HAS_COMPETITOR -> Athlete -> WON_MEDAL
                 try:
                     ev_edges = self.conn.getEdges("Event", ev_name)
                     for ee in ev_edges:
@@ -253,12 +240,10 @@ class GraphRAGPipeline:
         if not candidate_chunks:
             return []
 
-        # Deduplicate by chunk_id
         unique_chunks = {}
         for c in candidate_chunks:
             unique_chunks[c["chunk_id"]] = c
 
-        # Rank by question token overlap
         q_tokens = set(re.findall(r"\w+", question.lower()))
         ranked = sorted(
             unique_chunks.values(),
@@ -304,27 +289,22 @@ class GraphRAGPipeline:
     ) -> PipelineResult:
         start_time = time.time()
 
-        # 1. Entity linking
         linked = self.link_entities(question)
         has_entities = any(len(v) > 0 for v in linked.values())
 
-        # 2. Subgraph traversal with HeapAccum capping
         triples, events = [], []
         if has_entities:
             triples, events = self.traverse(linked, question)
 
-        # 3. Supporting chunk retrieval
         supporting_chunks = []
         if events:
             supporting_chunks = self.get_associated_chunks(events, question)
 
-        # 4. Fallback if graph evidence is empty
         if not triples and not supporting_chunks:
             supporting_chunks = self.fallback_vector_retrieve(question, top_k=self.top_k_chunks)
 
         retrieved_doc_ids = list(dict.fromkeys(c.get("doc_id", "") for c in supporting_chunks if c.get("doc_id")))
 
-        # 5. Build prompt
         graph_section = "\n".join(triples) if triples else "No direct entity triples identified."
         chunk_parts = []
         for c in supporting_chunks:
@@ -344,18 +324,14 @@ class GraphRAGPipeline:
             "Answer:"
         )
 
-        # 6. Single-pass LLM call
         response = llm_client.generate(prompt=prompt)
         latency = time.time() - start_time
 
-        # 7. Extract citations
         cited_chunks = re.findall(r"\[([a-zA-Z0-9_\-\.\:\s]+::c\d+)\]", response.content)
         cited_chunks = list(dict.fromkeys(cited_chunks))
 
-        # 8. Compute Exact Match
         acc = calculate_exact_match(response.content, ground_truth)
 
-        # 9. Build execution trace
         trace = {
             "strategy": "entity_linking_and_static_traversal",
             "linked_entities": [f"{vtype}:{vid}" for vtype, vlist in linked.items() for vid in vlist],

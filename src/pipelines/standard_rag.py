@@ -34,7 +34,6 @@ class StandardRAGPipeline:
         self.embeddings: Optional[np.ndarray] = None
         self.chunks_data: Dict[str, Dict[str, Any]] = {}
         
-        # Fall back to full embeddings if checkpoint not found
         if not os.path.exists(embeddings_npz) and os.path.exists("data/processed/chunk_embeddings.npz"):
             embeddings_npz = "data/processed/chunk_embeddings.npz"
         if not os.path.exists(chunks_jsonl) and os.path.exists("data/processed/chunks.jsonl"):
@@ -49,7 +48,6 @@ class StandardRAGPipeline:
             self.chunk_ids = list(data["chunk_ids"])
             self.embeddings = data["embeddings"]
             
-            # Normalize embeddings for cosine similarity
             norms = np.linalg.norm(self.embeddings, axis=1, keepdims=True)
             norms[norms == 0] = 1e-9
             self.embeddings = self.embeddings / norms
@@ -67,16 +65,13 @@ class StandardRAGPipeline:
         if self.embeddings is None or len(self.chunk_ids) == 0:
             return []
 
-        # 1. Embed incoming question with same FastEmbed model
         q_emb = embed_texts([question])[0]
         q_norm = np.linalg.norm(q_emb)
         if q_norm > 0:
             q_emb = q_emb / q_norm
 
-        # 2. Vector cosine similarities (dot product since normalized)
         sim_scores = np.dot(self.embeddings, q_emb)
 
-        # 3. Deterministic ranking: sort by (-score, chunk_id)
         ranked_indices = sorted(
             range(len(self.chunk_ids)),
             key=lambda idx: (-sim_scores[idx], self.chunk_ids[idx])
@@ -105,11 +100,9 @@ class StandardRAGPipeline:
     ) -> PipelineResult:
         start_time = time.time()
 
-        # 1. Retrieve top-k chunks
         retrieved_chunks = self.retrieve(question)
         retrieved_doc_ids = list(dict.fromkeys(c["doc_id"] for c in retrieved_chunks))
 
-        # 2. Build deterministic prompt
         context_parts = []
         for c in retrieved_chunks:
             title_header = f" [{c['title']}]" if c.get('title') else ""
@@ -127,18 +120,14 @@ class StandardRAGPipeline:
             "Answer:"
         )
 
-        # 3. Single-pass LLM call
         response = llm_client.generate(prompt=prompt)
         latency = time.time() - start_time
 
-        # 4. Extract cited chunk IDs
         cited_chunks = re.findall(r"\[([a-zA-Z0-9_\-\.\:\s]+::c\d+)\]", response.content)
         cited_chunks = list(dict.fromkeys(cited_chunks))
 
-        # 5. Calculate Exact Match
         acc = calculate_exact_match(response.content, ground_truth)
 
-        # 6. Build execution trace
         trace = {
             "strategy": "dense_vector_search",
             "model": "sentence-transformers/all-MiniLM-L6-v2 (FastEmbed ONNX)",

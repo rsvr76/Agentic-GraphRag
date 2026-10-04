@@ -51,7 +51,6 @@ def chunk_text(
     word_idx = 0
     total_words = len(words)
 
-    # Precompute word start/end character offsets in original text
     word_spans = []
     for m in re.finditer(r"\S+", text):
         word_spans.append((m.start(), m.end()))

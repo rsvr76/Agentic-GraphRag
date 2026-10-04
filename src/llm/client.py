@@ -1,10 +1,13 @@
 """Unified LLM client supporting Groq, NVIDIA NIM, and Google Gemini with multi-key rotation and automatic failover."""
 
 import os
+import socket
 import logging
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from src.config import settings
+
+socket.setdefaulttimeout(35.0)
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +149,6 @@ class UnifiedLLMClient:
                 )
                 usage = response.usage
                 content = response.choices[0].message.content or ""
-                # Also check reasoning_content if present in extra fields
                 return LLMResponse(
                     content=content,
                     prompt_tokens=usage.prompt_tokens if usage else 0,
@@ -173,13 +175,12 @@ class UnifiedLLMClient:
 
         active_model = (model or settings.gemini_model).strip()
         candidate_models = [active_model]
-        for m_fallback in ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash"]:
+        for m_fallback in ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.5-flash"]:
             if m_fallback not in candidate_models:
                 candidate_models.append(m_fallback)
 
         total_keys = len(gemini_keys)
 
-        # Try prioritized model first across keys before falling back to lite models
         for target_model in candidate_models:
             for offset in range(total_keys):
                 idx = (self._gemini_active_idx + offset) % total_keys
@@ -229,6 +230,7 @@ class UnifiedLLMClient:
                             provider=f"gemini_key_{idx+1}"
                         )
                 except Exception as e:
+                    print(f"[Gemini Key Rotation] Key #{idx+1} failed on {target_model} ({e}). Rotating to next Gemini key...", flush=True)
                     logger.debug(f"Gemini API key #{idx+1} with {target_model} failed ({e}). Trying next key/model.")
 
         return None
@@ -243,28 +245,38 @@ class UnifiedLLMClient:
     ) -> LLMResponse:
         active_provider = provider or self.provider
 
-        # Enforce API providers hierarchy: 1. Gemini (all keys), 2. NVIDIA NIM, 3. Groq
         providers_order = ["gemini", "nvidia", "groq"]
         if active_provider == "nvidia":
             providers_order = ["nvidia", "gemini", "groq"]
         elif active_provider == "groq":
             providers_order = ["groq", "gemini", "nvidia"]
 
-        for p in providers_order:
-            if p == "groq":
-                res = self._generate_groq(prompt, system_instruction, model, temperature)
-                if res is not None:
-                    return res
-            elif p == "nvidia":
-                res = self._generate_nvidia(prompt, system_instruction, model, temperature)
-                if res is not None:
-                    return res
-            elif p == "gemini":
-                res = self._generate_gemini(prompt, system_instruction, model, temperature)
-                if res is not None:
-                    return res
+        import concurrent.futures
 
-        # Simulation response if all configured providers are exhausted or unconfigured
+        def _execute_provider(p):
+            if p == "groq":
+                return self._generate_groq(prompt, system_instruction, model, temperature)
+            elif p == "nvidia":
+                return self._generate_nvidia(prompt, system_instruction, model, temperature)
+            elif p == "gemini":
+                return self._generate_gemini(prompt, system_instruction, model, temperature)
+            return None
+
+        for p in providers_order:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            try:
+                future = executor.submit(_execute_provider, p)
+                res = future.result(timeout=45)
+                executor.shutdown(wait=False, cancel_futures=True)
+                if res is not None:
+                    return res
+            except concurrent.futures.TimeoutError:
+                executor.shutdown(wait=False, cancel_futures=True)
+                print(f"[Provider Failover] {p} timed out after 45s. Rotating to next provider...", flush=True)
+            except Exception as e:
+                executor.shutdown(wait=False, cancel_futures=True)
+                print(f"[Provider Failover] {p} failed ({e}). Rotating to next provider...", flush=True)
+
         approx_tokens = len(prompt.split())
         return LLMResponse(
             content="[LLM execution simulated: Please configure valid API keys in .env]",

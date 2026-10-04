@@ -1,15 +1,8 @@
-// ========================================================
-// TigerGraph GSQL Schema for Olympic Corpus (Agentic GraphRAG)
-// Aligned with Final Plan (v3) Section 6
-// ========================================================
 
 CREATE GRAPH Olympics ()
 
 USE GRAPH Olympics
 
-// --------------------------------------------------------
-// Vertex Definitions
-// --------------------------------------------------------
 
 CREATE VERTEX Document (
     PRIMARY_ID doc_id STRING,
@@ -23,15 +16,11 @@ CREATE VERTEX Chunk (
     text STRING,
     start_offset INT,
     end_offset INT
-    // Note: If TigerVector is enabled (TigerGraph 4.2+), add:
-    // embedding VECTOR<FLOAT>(384)
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
 CREATE VERTEX Athlete (
     PRIMARY_ID athlete_id STRING,
     name STRING
-    // Note: If TigerVector is enabled, add:
-    // name_embedding VECTOR<FLOAT>(384)
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
 CREATE VERTEX Event (
@@ -80,9 +69,6 @@ CREATE VERTEX Date (
     day INT
 ) WITH STATS="OUTDEGREE_BY_EDGETYPE";
 
-// --------------------------------------------------------
-// Edge Definitions
-// --------------------------------------------------------
 
 CREATE DIRECTED EDGE WON_MEDAL (FROM Athlete, TO Medal, event_id STRING, competition_id STRING, date_held STRING) WITH REVERSE_EDGE="MEDAL_WON_BY";
 CREATE DIRECTED EDGE COMPETED_IN (FROM Athlete, TO Event) WITH REVERSE_EDGE="HAS_COMPETITOR";
@@ -92,12 +78,10 @@ CREATE DIRECTED EDGE REPRESENTS (FROM Athlete, TO Nation) WITH REVERSE_EDGE="HAS
 
 CREATE DIRECTED EDGE HAS_CHUNK (FROM Document, TO Chunk, chunk_index INT) WITH REVERSE_EDGE="CHUNK_OF_DOC";
 
-// Mentions edge linking document to any domain entity with citation tracking
 CREATE DIRECTED EDGE MENTIONS_ATHLETE (FROM Document, TO Athlete, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_ATHLETE";
 CREATE DIRECTED EDGE MENTIONS_EVENT (FROM Document, TO Event, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_EVENT";
 CREATE DIRECTED EDGE MENTIONS_COMPETITION (FROM Document, TO Competition, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_COMP";
 CREATE DIRECTED EDGE MENTIONS_VENUE (FROM Document, TO Venue, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_VENUE";
 CREATE DIRECTED EDGE MENTIONS_NATION (FROM Document, TO Nation, mention_chunk_id STRING) WITH REVERSE_EDGE="MENTIONED_IN_DOC_NATION";
 
-// Temporal sequential ordering between competitions (e.g., "immediately before 2016")
 CREATE DIRECTED EDGE PRECEDES (FROM Competition, TO Competition) WITH REVERSE_EDGE="SUCCEEDS";

@@ -125,7 +125,6 @@ class TigerGraphMCPTools:
                 return {"status": "success", "result": result}
             
             elif tool_name == "tg_vector_search":
-                # Simulated vector retrieval or native TigerGraph vector search
                 q_text = arguments.get("query_text", "")
                 top_k = arguments.get("top_k", 5)
                 return {

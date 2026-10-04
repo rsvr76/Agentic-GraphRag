@@ -16,7 +16,6 @@ from src.config import settings
 def get_embedding_model():
     """Initializes FastEmbed TextEmbedding model using ONNX runtime."""
     from fastembed import TextEmbedding
-    # Default model: BAAI/bge-small-en-v1.5 or sentence-transformers/all-MiniLM-L6-v2
     model_name = settings.local_embedding_model
     return TextEmbedding(model_name=model_name)
 
@@ -25,7 +24,6 @@ def embed_texts(texts: List[str], batch_size: int = 32) -> np.ndarray:
     """Generates normalized vector embeddings for a list of texts using FastEmbed."""
     model = get_embedding_model()
     embeddings_list = []
-    # FastEmbed's embed generator handles batching efficiently
     for emb in model.embed(texts, batch_size=batch_size):
         embeddings_list.append(emb)
     return np.array(embeddings_list, dtype=np.float32)
@@ -51,7 +49,6 @@ def embed_chunks(
                 break
             data = json.loads(line.strip())
             chunk_ids.append(data["chunk_id"])
-            # Prefix title for stronger retrieval context
             title = data.get("title", "")
             text = data.get("text", "")
             texts.append(f"{title}: {text}" if title else text)

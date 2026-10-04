@@ -26,13 +26,11 @@ def derive_precedes_edges(df_comp: pd.DataFrame) -> pd.DataFrame:
 
     precedes_records = []
 
-    # Sort separately by season to connect Summer -> next Summer and Winter -> next Winter
     for season in ["Summer", "Winter"]:
         season_df = df_comp[df_comp["season"] == season].sort_values(by="year").reset_index(drop=True)
         for i in range(len(season_df) - 1):
             curr_id = season_df.iloc[i]["competition_id"]
             next_id = season_df.iloc[i + 1]["competition_id"]
-            # curr_id PRECEDES next_id
             precedes_records.append({"from_id": curr_id, "to_id": next_id})
 
     return pd.DataFrame(precedes_records)
@@ -62,13 +60,11 @@ def load_corpus_into_tigergraph(
     logger.info(f"Extracting graph DataFrames for {len(docs)} documents...")
     tables = extract_graph_dataframes(docs)
 
-    # Derive PRECEDES edges from competitions
     df_precedes = derive_precedes_edges(tables["Competition"])
     tables["PRECEDES"] = df_precedes
 
     results = {}
 
-    # 1. Upsert Vertices
     logger.info("Upserting vertices...")
 
     vertex_configs = [
@@ -95,7 +91,6 @@ def load_corpus_into_tigergraph(
             results[f"vertex_{v_type}"] = count
             logger.info(f"Upserted {count} {v_type} vertices.")
 
-    # 2. Upsert Edges
     logger.info("Upserting edges...")
 
     edge_configs = [
