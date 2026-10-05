@@ -26,14 +26,39 @@ from src.evaluation.metrics import PipelineResult, calculate_exact_match
 from langgraph.graph import StateGraph, END
 
 
+def _merge_unique_chunks(
+    existing: List[Dict[str, Any]], new: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Deduplicating reducer ensuring unique chunk_ids in state."""
+    seen: Dict[str, Dict[str, Any]] = {c["chunk_id"]: c for c in existing}
+    for c in new:
+        seen[c["chunk_id"]] = c
+    return list(seen.values())
+
+
+ALL_CORPUS_SPORTS = [
+    "Short-track speed skating", "Synchronized swimming", "Cross-country skiing",
+    "Beach volleyball", "Freestyle skiing", "Marathon swimming", "Modern pentathlon",
+    "Nordic combined", "Figure skating", "Alpine skiing", "Weightlifting", "Table tennis",
+    "Speed skating", "Ski jumping", "Snowboarding", "Field hockey", "Rugby sevens",
+    "Skateboarding", "Equestrian", "Gymnastics", "Ice hockey", "Water polo",
+    "Badminton", "Athletics", "Bobsleigh", "Taekwondo", "Triathlon", "Wrestling",
+    "Biathlon", "Canoeing", "Football", "Handball", "Skeleton", "Shooting",
+    "Swimming", "Archery", "Curling", "Cycling", "Fencing", "Sailing",
+    "Tennis", "Boxing", "Diving", "Rowing", "Golf", "Judo", "Luge"
+]
+
+
 class AgentState(TypedDict):
+
     question: str
     qid: str
     archetype: str
     sub_questions: Annotated[List[str], operator.add]
     evidence_log: Annotated[List[Dict[str, Any]], operator.add]
     graph_context: Dict[str, Any]
-    vector_context: Annotated[List[Dict[str, Any]], operator.add]
+    vector_context: Annotated[List[Dict[str, Any]], _merge_unique_chunks]
+
     iteration: int
     max_iterations: int
     prompt_tokens: int
@@ -79,6 +104,7 @@ class AgenticGraphRAGPipeline:
 
         self.app = self._build_graph()
 
+
     def _load_chunks(self, chunks_jsonl: str):
         if os.path.exists(chunks_jsonl):
             with open(chunks_jsonl, "r", encoding="utf-8") as f:
@@ -114,6 +140,8 @@ class AgenticGraphRAGPipeline:
             self.athletes = {a["v_id"]: a.get("attributes", {}) for a in athletes}
         except Exception as e:
             print(f"Warning: Failed to cache graph entities: {e}")
+
+
 
     def _find_chunks_for_titles(self, titles: List[str]) -> List[Dict[str, Any]]:
         chunks = []
@@ -156,7 +184,7 @@ class AgenticGraphRAGPipeline:
             archetype = "superlative"
         elif "immediately before" in q or "preceding" in q:
             archetype = "temporal"
-        elif "held at" in q or ("on" in q and re.search(r"\b19\d\d\b|\b20\d\d\b", q)) or "pavilion" in q or "gymnasium" in q or "velopark" in q or "oval" in q:
+        elif "held at" in q or ("on" in q and re.search(r"\b19\d\d\b|\b20\d\d\b", q)) or any(len(v) > 3 and v.lower() in q for v in self.venues):
             archetype = "multi_hop"
         else:
             archetype = "lookup"
@@ -172,10 +200,11 @@ class AgenticGraphRAGPipeline:
         thresh_match = re.search(r"more than\s+(\d+)", q_lower)
         threshold = int(thresh_match.group(1)) if thresh_match else 0
         
-        sports = ["biathlon", "shooting", "sailing", "cycling", "rowing", "athletics", "swimming", "judo", "badminton", "weightlifting"]
-        sport = next((s.capitalize() for s in sports if s in q_lower), "")
-        
+        sport = next((s for s in ALL_CORPUS_SPORTS if s.lower() in q_lower), "")
         sport_clause = f'AND lower(e.sport) == "{sport.lower()}"' if sport else ''
+
+
+
         query = f"""
         INTERPRET QUERY () FOR GRAPH Olympics {{
             SumAccum<INT> @@event_count = 0;
@@ -195,10 +224,26 @@ class AgenticGraphRAGPipeline:
             event_titles = [e.get("v_id", "") for e in events]
             chunks = self._find_chunks_for_titles(event_titles)
             
+            if count == 0 and self.events:
+                cached_matches = []
+                for title, attrs in self.events.items():
+                    t_lower = title.lower()
+                    if comp_name.lower() in t_lower:
+                        ev_sport = attrs.get("sport", "").lower()
+                        if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                            c_num = attrs.get("competitors")
+                            if c_num and isinstance(c_num, (int, float)) and c_num > threshold:
+                                cached_matches.append(f"{title} ({c_num} competitors)")
+                                event_titles.append(title)
+                if cached_matches:
+                    count = len(cached_matches)
+                    chunks = self._find_chunks_for_titles(event_titles)
+                    events = [{"v_id": t, "attributes": {"Events.competitors": c}} for t, c in zip(event_titles, [attrs.get("competitors") for attrs in self.events.values()])]
+
             evidence = {
                 "tool": "gsql_sumaccum",
                 "result_count": count,
-                "matching_events": [f"{e.get('v_id')} ({e.get('attributes', {}).get('Events.competitors')} competitors)" for e in events],
+                "matching_events": [f"{e.get('v_id')} ({e.get('attributes', {}).get('Events.competitors')} competitors)" for e in events] if not cached_matches else cached_matches,
                 "competition": comp_name,
                 "threshold": threshold,
                 "sport": sport
@@ -211,6 +256,35 @@ class AgenticGraphRAGPipeline:
                 "stop_reason": "sufficient_evidence"
             }
         except Exception as e:
+            if self.events:
+                cached_matches = []
+                cached_titles = []
+                for title, attrs in self.events.items():
+                    t_lower = title.lower()
+                    if comp_name.lower() in t_lower:
+                        ev_sport = attrs.get("sport", "").lower()
+                        if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                            c_num = attrs.get("competitors")
+                            if c_num and isinstance(c_num, (int, float)) and c_num > threshold:
+                                cached_matches.append(f"{title} ({c_num} competitors)")
+                                cached_titles.append(title)
+                if cached_matches:
+                    chunks = self._find_chunks_for_titles(cached_titles)
+                    evidence = {
+                        "tool": "graph_cache_fallback",
+                        "result_count": len(cached_matches),
+                        "matching_events": cached_matches,
+                        "competition": comp_name,
+                        "threshold": threshold,
+                        "sport": sport
+                    }
+                    return {
+                        "graph_context": evidence,
+                        "vector_context": chunks[:3],
+                        "evidence_log": [evidence],
+                        "is_sufficient": True,
+                        "stop_reason": "sufficient_evidence"
+                    }
             return {"is_sufficient": False, "gap_description": f"Aggregation GSQL failed: {e}"}
 
     def _superlative_node(self, state: AgentState) -> Dict[str, Any]:
@@ -222,9 +296,9 @@ class AgenticGraphRAGPipeline:
         find_max = not ("lowest" in q_lower or "least" in q_lower)
         order = "DESC" if find_max else "ASC"
         
-        sports = ["biathlon", "shooting", "sailing", "cycling", "rowing", "athletics", "swimming", "judo", "badminton", "weightlifting"]
-        sport = next((s.capitalize() for s in sports if s in q_lower), "")
+        sport = next((s for s in ALL_CORPUS_SPORTS if s.lower() in q_lower), "")
         sport_clause = f'AND lower(e.sport) == "{sport.lower()}"' if sport else ''
+
         
         query = f"""
         INTERPRET QUERY () FOR GRAPH Olympics {{
@@ -247,13 +321,35 @@ class AgenticGraphRAGPipeline:
             top_event = top_event_list[0] if top_event_list else {}
             ev_name = top_event.get("event_name", "")
             comp_cnt = top_event.get("competitors", 0)
-            
-            full_title = ""
-            for v_id, attrs in self.events.items():
-                if attrs.get("name") == ev_name or v_id == ev_name:
-                    full_title = v_id
-                    break
-            
+
+            if not ev_name:
+                # Fast fallback to in-memory graph cache
+                if self.events:
+                    candidates = []
+                    for title, attrs in self.events.items():
+                        t_lower = title.lower()
+                        if comp_name.lower() in t_lower:
+                            ev_sport = attrs.get("sport", "").lower()
+                            if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                                c_num = attrs.get("competitors")
+                                if c_num and isinstance(c_num, (int, float)) and c_num > 0:
+                                    candidates.append((c_num, title, attrs.get("name", title)))
+                    if candidates:
+                        candidates.sort(key=lambda x: x[0], reverse=find_max)
+                        comp_cnt = candidates[0][0]
+                        full_title = candidates[0][1]
+                        ev_name = candidates[0][2]
+
+            if not ev_name:
+                gap = f"No {sport or 'matching'} events with competitors > 0 found under competition '{comp_name}'."
+                return {"is_sufficient": False, "gap_description": gap}
+
+            if not full_title:
+                for v_id, attrs in self.events.items():
+                    if attrs.get("name") == ev_name or v_id == ev_name:
+                        full_title = v_id
+                        break
+
             chunks = self._find_chunks_for_titles([full_title or ev_name])
             evidence = {
                 "tool": "gsql_heapaccum",
@@ -271,19 +367,78 @@ class AgenticGraphRAGPipeline:
                 "stop_reason": "sufficient_evidence"
             }
         except Exception as e:
+            # Fallback to in-memory graph cache on any GSQL error or timeout
+            if self.events:
+                candidates = []
+                for title, attrs in self.events.items():
+                    t_lower = title.lower()
+                    if comp_name.lower() in t_lower:
+                        ev_sport = attrs.get("sport", "").lower()
+                        if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                            c_num = attrs.get("competitors")
+                            if c_num and isinstance(c_num, (int, float)) and c_num > 0:
+                                candidates.append((c_num, title, attrs.get("name", title)))
+                if candidates:
+                    candidates.sort(key=lambda x: x[0], reverse=find_max)
+                    comp_cnt = candidates[0][0]
+                    full_title = candidates[0][1]
+                    ev_name = candidates[0][2]
+                    chunks = self._find_chunks_for_titles([full_title or ev_name])
+                    evidence = {
+                        "tool": "graph_cache_fallback",
+                        "superlative_event": ev_name,
+                        "full_event_title": full_title,
+                        "competitors": comp_cnt,
+                        "competition": comp_name,
+                        "sport": sport
+                    }
+                    return {
+                        "graph_context": evidence,
+                        "vector_context": chunks[:3],
+                        "evidence_log": [evidence],
+                        "is_sufficient": True,
+                        "stop_reason": "sufficient_evidence"
+                    }
             return {"is_sufficient": False, "gap_description": f"Superlative GSQL failed: {e}"}
+
 
     def _temporal_node(self, state: AgentState) -> Dict[str, Any]:
         q = state["question"]
         q_lower = q.lower()
         
-        before_match = re.search(r"immediately before (\d{4})", q_lower)
+        before_match = re.search(
+            r"(?:immediately\s+)?(?:before|preceding|prior\s+to)\s+(\d{4})",
+            q_lower
+        )
         if not before_match:
             return {"is_sufficient": False, "gap_description": "No temporal anchor detected"}
-            
+
         anchor_year = before_match.group(1)
-        season = "Summer" if "summer" in q_lower else "Winter"
-        anchor_comp = f"{anchor_year} {season}"
+
+        # Determine season: prefer explicit mention, otherwise probe the live graph to
+        # find which season's competition actually exists for this year.
+        # This eliminates the previous silent "Winter" default which would silently
+        # return wrong results when neither "summer" nor "winter" appears in the question.
+        if "summer" in q_lower:
+            seasons_to_try = ["Summer"]
+        elif "winter" in q_lower:
+            seasons_to_try = ["Winter"]
+        else:
+            seasons_to_try = ["Summer", "Winter"]  # unknown season — probe graph
+
+        anchor_comp = ""
+        for _season in seasons_to_try:
+            _cand = f"{anchor_year} {_season}"
+            try:
+                _edges = self.conn.getEdges("Competition", _cand)
+                if _edges:
+                    anchor_comp = _cand
+                    break
+            except Exception:
+                continue
+        if not anchor_comp:
+            anchor_comp = f"{anchor_year} {seasons_to_try[0]}"  # graceful fallback
+
         
         target_comp = ""
         best_year = -1
@@ -405,30 +560,61 @@ class AgenticGraphRAGPipeline:
         if not matched_venue:
             return {"is_sufficient": False, "gap_description": "Could not bind venue"}
 
-
         months = 'January|February|March|April|May|June|July|August|September|October|November|December'
         date_pattern = rf"(\d{{1,2}}(?:\s*(?:to|–|-)\s*\d{{1,2}})?\s+(?:{months})(?:\s+\d{{4}})?|(?:{months})\s+\d{{1,2}}(?:,\s*\d{{4}}|\s+\d{{4}})?)"
         date_match = re.search(date_pattern, q, re.IGNORECASE)
         date_query = date_match.group(1).lower() if date_match else ""
 
+        # Extract full date span to capture compound date ranges and tournament stages
+        full_date_span = date_query
+        on_after = re.search(r"\bon\s+(.+?)(?:\s*\?\s*$|\s*$)", q, re.IGNORECASE)
+        if on_after:
+            candidate_span = on_after.group(1).strip().lower()
+            if len(candidate_span) > len(full_date_span):
+                full_date_span = candidate_span
+
+        def _date_overlap_score(date_held: str, span: str) -> float:
+            """Bigram character-overlap ratio between stored date_held and query date span."""
+            if not date_held or not span:
+                return 0.0
+            dh = date_held.lower().strip()
+            sp = span.lower().strip()
+            if dh == sp:
+                return 1.0
+            if sp in dh or dh in sp:
+                return len(min(dh, sp, key=len)) / max(len(dh), len(sp), 1)
+            bg_dh = set(dh[i:i+2] for i in range(len(dh) - 1))
+            bg_sp = set(sp[i:i+2] for i in range(len(sp) - 1))
+            if not bg_dh or not bg_sp:
+                return 0.0
+            return len(bg_dh & bg_sp) / max(len(bg_dh), len(bg_sp))
+
+        year_match = re.search(r'\b(19|20)\d{2}\b', q)
+        year_filter = year_match.group(0) if year_match else ""
+
         venue_edges = self.conn.getEdges("Venue", matched_venue)
         candidate_events = [e["to_id"] for e in venue_edges if e.get("to_type") == "Event"]
+
+        if year_filter:
+            candidate_events = [ev for ev in candidate_events if year_filter in ev] or candidate_events
 
         extracted_event = extracted.get("event", "")
         if extracted_event and extracted_event not in candidate_events:
             candidate_events.append(extracted_event)
 
-        event_winners = {}
+        date_matched_winners: Dict[str, tuple] = {}
+        fallback_winners: Dict[str, List[str]] = {}
         target_event = ""
-        
+
         for ev in candidate_events:
             try:
                 ev_edges = self.conn.getEdges("Event", ev)
-            except Exception as e:
+            except Exception:
                 continue
-                
+
             winners = []
             ev_date_match = False
+            best_overlap_for_ev = 0.0
             for ee in ev_edges:
                 if ee.get("e_type") == "HAS_COMPETITOR":
                     ath_name = ee["to_id"]
@@ -443,19 +629,40 @@ class AgenticGraphRAGPipeline:
                             d_held = m_attrs.get("date_held", "").lower()
                             if date_query and d_held and (date_query in d_held or d_held in date_query or d_held in q_lower):
                                 ev_date_match = True
-            
+                                overlap = _date_overlap_score(d_held, full_date_span)
+                                if overlap > best_overlap_for_ev:
+                                    best_overlap_for_ev = overlap
+
             if winners:
-                event_winners[ev] = winners
-            if ev_date_match:
-                target_event = ev
-                break
-                
+                fallback_winners[ev] = winners
+            if ev_date_match and winners:
+                date_matched_winners[ev] = (winners, best_overlap_for_ev)
+
+        # Rank candidate winners by character overlap between date_held and query date span
         gold_winners = []
-        if target_event:
-            gold_winners = event_winners[target_event]
-        elif len(event_winners) == 1 and not date_query:
-            target_event = list(event_winners.keys())[0]
-            gold_winners = event_winners[target_event]
+        if date_matched_winners:
+            ranked = sorted(date_matched_winners.items(), key=lambda kv: kv[1][1], reverse=True)
+            target_event = ranked[0][0]
+            gold_winners = ranked[0][1][0]
+        elif len(fallback_winners) == 1 and not date_query:
+            target_event = list(fallback_winners.keys())[0]
+            gold_winners = fallback_winners[target_event]
+
+        # Verify candidate events against corpus chunks when query contains extended date spans
+        if gold_winners and full_date_span and full_date_span != date_query and len(full_date_span) > len(date_query):
+            matched_no_winner_events = [
+                ev for ev in candidate_events
+                if ev not in fallback_winners and ev not in date_matched_winners
+            ]
+            for ev in matched_no_winner_events:
+                ev_chunks = self._find_chunks_for_titles([ev])
+                for chunk in ev_chunks[:1]:
+                    if full_date_span in chunk.get("text", "").lower():
+                        target_event = ev
+                        gold_winners = []
+                        break
+                if not gold_winners:
+                    break
 
         chunks = self._find_chunks_for_titles([target_event] if target_event else candidate_events[:1])
 
@@ -480,8 +687,11 @@ class AgenticGraphRAGPipeline:
             "tool": "multi_hop_chain",
             "venue": matched_venue,
             "date_constraint": date_query,
+            "year_filter": year_filter,
             "event": target_event,
-            "gold_winners": clean_winners
+            "gold_winners": clean_winners,
+            "date_matched": bool(date_matched_winners),
+            "candidate_events_checked": len(candidate_events)
         }
         is_sufficient = bool(gold_winners) and bool(target_event)
         gap_desc = ""
@@ -489,7 +699,12 @@ class AgenticGraphRAGPipeline:
             if not target_event:
                 gap_desc = f"Could not bind the specific event held at venue {matched_venue} on date {date_query}."
             elif not gold_winners:
-                gap_desc = f"Could not find the gold medal winner for event {target_event}."
+                # Direct fallback vector search to retrieve winner for the identified event
+                gap_desc = (
+                    f"Graph has no gold medal record for event '{target_event}'. "
+                    f"Search the corpus for the gold medal winner of: {target_event}."
+                )
+
 
         return {
             "graph_context": evidence,
@@ -499,6 +714,7 @@ class AgenticGraphRAGPipeline:
             "gap_description": gap_desc,
             "stop_reason": "sufficient_evidence" if is_sufficient else "missing_gold_winner"
         }
+
 
     def _lookup_node(self, state: AgentState) -> Dict[str, Any]:
         q = state["question"]
@@ -546,17 +762,29 @@ class AgenticGraphRAGPipeline:
         }
 
     def _reflect_node(self, state: AgentState) -> Dict[str, Any]:
-        if state.get("is_sufficient"):
+        if state.get("is_sufficient") or state.get("stop_reason") == "sufficient_evidence":
             return {"stop_reason": "sufficient_evidence"}
         if state["iteration"] >= state["max_iterations"]:
             return {"stop_reason": "max_iterations"}
+        # Pillar 2: respect explicit routing signals from fallback node
+        if state.get("stop_reason") == "terminal_entity_resolved":
+            return {"stop_reason": "sufficient_evidence"}
+        if state.get("stop_reason") == "fallback_complete":
+            return {"stop_reason": "fallback_complete"}
         return {"stop_reason": "retrieve_more"}
 
     def _fallback_search_node(self, state: AgentState) -> Dict[str, Any]:
         q = state["question"]
-        gap = state.get("gap_description", "") or q
-        archetype = state.get("archetype", "lookup")
         existing_entities = dict(state.get("extracted_entities") or {})
+        archetype = state.get("archetype", "lookup")
+
+        # Cumulative gap representation combining resolved entities and missing targets
+        base_gap = state.get("gap_description", "") or q
+        if existing_entities:
+            resolved_str = ", ".join(f"{k}={v}" for k, v in existing_entities.items())
+            gap = f"Already resolved: {resolved_str}. Still missing: {base_gap}"
+        else:
+            gap = base_gap
 
         query_prompt = (
             "You are an Agentic GraphRAG orchestrator. A graph traversal failed with the following gap:\n"
@@ -575,7 +803,8 @@ class AgenticGraphRAGPipeline:
 
         chunks = self._vector_search(targeted_query, top_k=10)
 
-        gap_lower = gap.lower()
+        # Determine what entity type we are hunting for
+        gap_lower = base_gap.lower()
         if "winner" in gap_lower or "athlete" in gap_lower or "gold" in gap_lower:
             entity_type = "athlete"
         elif "event" in gap_lower:
@@ -625,7 +854,12 @@ class AgenticGraphRAGPipeline:
             "resolution_status": "resolved" if extracted_value != "UNKNOWN" else "unresolved"
         }
 
+        # Entity routing: intermediate entities loop back for graph resolution; terminal entities exit to synthesis
         if extracted_value != "UNKNOWN" and entity_type in ["venue", "event"]:
+            next_gap = (
+                f"Event resolved to: {extracted_value}. "
+                f"Now find the gold medal winner for this specific event."
+            )
             return {
                 "vector_context": chunks,
                 "evidence_log": [gap_resolution_log],
@@ -633,7 +867,7 @@ class AgenticGraphRAGPipeline:
                 "is_sufficient": False,
                 "stop_reason": "fallback_complete",
                 "extracted_entities": existing_entities,
-                "gap_description": "",
+                "gap_description": next_gap,
                 "prompt_tokens": prompt_toks,
                 "completion_tokens": completion_toks,
                 "total_tokens": prompt_toks + completion_toks,
@@ -644,36 +878,84 @@ class AgenticGraphRAGPipeline:
             "evidence_log": [gap_resolution_log],
             "iteration": state["iteration"] + 1,
             "is_sufficient": True,
-            "stop_reason": "fallback_complete",
+            "stop_reason": "terminal_entity_resolved",
             "extracted_entities": existing_entities,
             "prompt_tokens": prompt_toks,
             "completion_tokens": completion_toks,
             "total_tokens": prompt_toks + completion_toks,
         }
 
+
     def _synthesize_node(self, state: AgentState) -> Dict[str, Any]:
         q = state["question"]
-        g_ctx = json.dumps(state.get("graph_context", {}), indent=2)
-        v_parts = []
-        for c in state.get("vector_context", []):
-            title_header = f" [{c['title']}]" if c.get('title') else ""
-            v_parts.append(f"[{c['chunk_id']}]{title_header}\n{c['text']}")
-        v_ctx = "\n\n".join(v_parts) if v_parts else "No direct passage."
+        archetype = state.get("archetype", "")
+        g_ctx_raw = state.get("graph_context", {})
+        extracted_entities = state.get("extracted_entities") or {}
 
-        prompt = (
-            "You are an Agentic GraphRAG assistant synthesizing an exact, verified answer to an Olympic question.\n\n"
-            f"Question: {q}\n"
-            f"Archetype: {state.get('archetype')}\n\n"
-            f"Verified In-Database Graph Facts:\n{g_ctx}\n\n"
-            f"Supporting Context Passages:\n{v_ctx}\n\n"
-            "Instructions:\n"
-            "1. Answer concisely, directly, and accurately using strictly the verified graph facts and passages.\n"
-            "2. If an integer count was calculated by GSQL accumulator, state the exact integer.\n"
-            "3. If answering an event name or title question, state both the specific event name and the full event title (e.g. 'Athletics at the 2008 Summer Olympics – Men\\'s marathon') if present in the graph facts.\n"
-            "4. If answering a team event, list all winning athletes.\n"
-            "5. Cite the relevant chunk IDs (e.g. [doc_id::c0]) or graph entities used.\n\n"
-            "Final Answer:"
-        )
+        if archetype == "aggregation":
+            result_count = g_ctx_raw.get("result_count", "unknown")
+            competition = g_ctx_raw.get("competition", "")
+            threshold = g_ctx_raw.get("threshold", 0)
+            sport = g_ctx_raw.get("sport", "")
+            matching_events = g_ctx_raw.get("matching_events", [])
+            example = matching_events[0] if matching_events else "no example available"
+
+            prompt = (
+                "You are an Agentic GraphRAG assistant. Answer the following Olympic question using only the verified database result below.\n\n"
+                f"Question: {q}\n\n"
+                "Verified Database Result (computed by GSQL SumAccum — treat this count as ground truth):\n"
+                f"  Competition: {competition}\n"
+                f"  Sport filter: {sport or 'all sports'}\n"
+                f"  Competitor threshold: more than {threshold}\n"
+                f"  Verified count of matching events: {result_count}\n"
+                f"  Example matching event: {example}\n\n"
+                "Instructions:\n"
+                "1. State the exact integer count as your answer.\n"
+                "2. Be concise. One or two sentences.\n"
+                "3. Do not enumerate or list all events.\n\n"
+                "Final Answer:"
+            )
+        else:
+            g_ctx = json.dumps(g_ctx_raw, indent=2)
+
+            # Filter context chunks by entity presence and question keyword relevance
+            stopwords = {
+                "the", "a", "an", "at", "in", "on", "of", "who", "what",
+                "which", "when", "how", "did", "was", "were", "held", "won",
+                "and", "or", "for", "to", "from", "by", "with", "is", "are"
+            }
+            q_keywords = [w for w in q.lower().split() if w not in stopwords]
+
+            def _is_relevant(chunk: Dict[str, Any]) -> bool:
+                text = chunk.get("text", "").lower()
+                for val in extracted_entities.values():
+                    if val.lower() in text:
+                        return True
+                return any(kw in text for kw in q_keywords)
+
+            admitted = [c for c in state.get("vector_context", []) if _is_relevant(c)]
+
+            v_parts = []
+            for c in admitted:
+                title_header = f" [{c['title']}]" if c.get("title") else ""
+                v_parts.append(f"[{c['chunk_id']}]{title_header}\n{c['text']}")
+            v_ctx = "\n\n".join(v_parts) if v_parts else "No direct passage."
+
+
+            prompt = (
+                "You are an Agentic GraphRAG assistant synthesizing an exact, verified answer to an Olympic question.\n\n"
+                f"Question: {q}\n"
+                f"Archetype: {archetype}\n\n"
+                f"Verified In-Database Graph Facts:\n{g_ctx}\n\n"
+                f"Supporting Context Passages:\n{v_ctx}\n\n"
+                "Instructions:\n"
+                "1. Answer concisely, directly, and accurately using strictly the verified graph facts and passages.\n"
+                "2. If an integer count was calculated by GSQL accumulator, state the exact integer.\n"
+                "3. If answering an event name or title question, state both the specific event name and the full event title (e.g. 'Athletics at the 2008 Summer Olympics \u2013 Men\'s marathon') if present in the graph facts.\n"
+                "4. If answering a team event, list all winning athletes.\n"
+                "5. Cite the relevant chunk IDs (e.g. [doc_id::c0]) or graph entities used.\n\n"
+                "Final Answer:"
+            )
 
         resp = llm_client.generate(prompt=prompt)
         cited_chunks = re.findall(r"\[([a-zA-Z0-9_\-\.\:\s]+::c\d+)\]", resp.content)
@@ -686,6 +968,8 @@ class AgenticGraphRAGPipeline:
             "completion_tokens": resp.completion_tokens,
             "total_tokens": resp.total_tokens
         }
+
+
 
     def _route_archetype(self, state: AgentState) -> str:
         arch = state.get("archetype", "lookup")

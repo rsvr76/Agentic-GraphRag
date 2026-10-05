@@ -50,12 +50,33 @@ NUMBER_WORDS = {
 }
 
 
+def _canonical_token_set(raw: str) -> set:
+    """Splits a raw answer string into a sorted canonical token set.
+
+    Handles camelCase concatenation, Unicode, delimiter variations, and
+    accented character equivalents so that 'ErikLesserDanielBohm' and
+    'Erik Lesser, Daniel Böhm' produce the same token set.
+    """
+    s = unicodedata.normalize("NFKC", str(raw))
+    s = s.encode("ascii", errors="ignore").decode("ascii")
+    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    s = re.sub(r"[^a-zA-Z0-9\s]", " ", s)
+    s = s.lower()
+    tokens = {t for t in s.split() if len(t) > 1}
+    return tokens
+
+
 def calculate_exact_match(prediction: str, ground_truth: List[str]) -> float:
     """Exact string or substring match against any accepted ground-truth variant.
-    
+
     Enforces word boundary matching for numbers to avoid false positives (e.g. '8' matching '2008').
+    Also applies canonical token-set normalization to handle concatenated team names and
+    delimiter variations in multi-athlete answers.
     """
     pred_clean = normalize_text(prediction)
+    pred_token_set = _canonical_token_set(prediction)
+
     for gold in ground_truth:
         gold_clean = normalize_text(gold)
         if not gold_clean:
@@ -89,7 +110,12 @@ def calculate_exact_match(prediction: str, ground_truth: List[str]) -> float:
             if camel_lower and camel_lower.issubset(pred_words):
                 return 1.0
 
+        gold_token_set = _canonical_token_set(raw_gold)
+        if gold_token_set and len(gold_token_set) >= 2 and gold_token_set.issubset(pred_token_set):
+            return 1.0
+
     return 0.0
+
 
 
 def calculate_token_stats(results: List[PipelineResult]) -> Dict[str, Any]:

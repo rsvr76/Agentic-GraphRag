@@ -13,7 +13,9 @@ import logging
 from typing import Dict, List, Optional
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from src.pipelines.standard_rag import StandardRAGPipeline
 from src.pipelines.graph_rag import GraphRAGPipeline
@@ -363,6 +365,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=None, help="Number of questions to evaluate")
     parser.add_argument("--batch", type=int, default=None, help="Batch index (1 to 10) to run 10 questions per batch")
     parser.add_argument("--batch-size", type=int, default=10, help="Questions per batch (default: 10)")
+    parser.add_argument("--batch-dir", type=str, default="data/processed/batches", help="Directory to store batch outputs")
     parser.add_argument("--pipelines", nargs="+", default=["standard_rag", "graph_rag", "agentic_graphrag"], help="Pipelines to test: standard_rag, graph_rag, agentic_graphrag")
     parser.add_argument("--output", type=str, default="data/processed/results_benchmark.jsonl", help="Master output JSONL destination")
     parser.add_argument("--report", type=str, default="data/processed/agent_execution_traces.md", help="Markdown execution traces report destination")
@@ -381,11 +384,12 @@ if __name__ == "__main__":
         bsize = args.batch_size
         offset = (b_idx - 1) * bsize
         limit = bsize
-        os.makedirs("data/processed/batches", exist_ok=True)
-        output_file = f"data/processed/batches/batch_{b_idx:02d}_results.jsonl"
-        report_file = f"data/processed/batches/batch_{b_idx:02d}_traces.md"
+        os.makedirs(args.batch_dir, exist_ok=True)
+        output_file = f"{args.batch_dir}/batch_{b_idx:02d}_results.jsonl"
+        report_file = f"{args.batch_dir}/batch_{b_idx:02d}_traces.md"
         if not args.resume and os.path.exists(output_file):
             os.remove(output_file)
+
     else:
         if not args.resume and os.path.exists(args.output):
             os.remove(args.output)

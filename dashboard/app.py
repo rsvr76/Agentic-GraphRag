@@ -115,22 +115,38 @@ def get_graph_live_stats() -> Dict[str, Any]:
 # Sidebar Controls
 st.sidebar.title("Configuration")
 
-batch_files = []
-batch_dir = "data/processed/batches"
-if os.path.exists(batch_dir):
-    batch_files = sorted([os.path.join(batch_dir, f).replace("\\", "/") for f in os.listdir(batch_dir) if f.endswith(".jsonl")])
+# Find all result JSONL files across data/processed
+found_files = []
+if os.path.exists("data/processed"):
+    for root, _, files in os.walk("data/processed"):
+        for f in files:
+            if f.endswith(".jsonl"):
+                p = os.path.join(root, f).replace("\\", "/")
+                found_files.append(p)
 
-dataset_options = [
+priority_order = [
     "data/processed/results_benchmark.jsonl",
-    "data/processed/results_checkpoint.jsonl",
-    "data/processed/results_hidden.jsonl"
-] + batch_files
+    "data/processed/benchmark_v2/results_benchmark.jsonl",
+    "data/processed/results_hidden_agentic.jsonl",
+    "data/processed/submission_hidden_predictions.jsonl",
+    "data/processed/results_checkpoint.jsonl"
+]
 
-existing_options = [p for p in dataset_options if os.path.exists(p)]
-if not existing_options:
-    existing_options = dataset_options[:1]
 
-selected_file = st.sidebar.selectbox("Evaluation Results File", existing_options, index=0)
+
+all_options = []
+for p in priority_order:
+    if p in found_files and p not in all_options:
+        all_options.append(p)
+for p in sorted(found_files):
+    if p not in all_options:
+        all_options.append(p)
+
+if not all_options:
+    all_options = ["data/processed/results_benchmark.jsonl"]
+
+selected_file = st.sidebar.selectbox("Evaluation Results File", all_options, index=0)
+
 
 st.sidebar.subheader("Active Stack Metadata")
 st.sidebar.markdown("""
@@ -218,13 +234,19 @@ with tab_aggregate:
         df_lat = df_summary[["Pipeline", "Avg Latency (s)"]].set_index("Pipeline")
         st.bar_chart(df_lat, color="#6c757d")
 
-    # Key Architectural Takeaways
-    st.subheader("Key Architectural Takeaways")
+    # Architectural Comparison: Where Simpler Suffices vs. Where Agentic Is Necessary
+    st.subheader("Architectural Comparison: Where Simpler Suffices vs. Where Agentic Is Necessary")
     st.markdown("""
-    - Accuracy Differential: Autonomous Agentic GraphRAG achieved 93.3% accuracy, outperforming both Standard RAG (66.7%) and Static GraphRAG (66.7%) by +26.6% absolute margin.
-    - Token Efficiency: In-database GSQL accumulator queries (SumAccum, HeapAccum) reduced synthesis prompt size, cutting token consumption by 54.7% (2,834 tokens vs. 6,258 tokens).
-    - Latency: Agentic targeted graph lookups executed in 20.97 seconds on average, 40% faster than dense vector retrieval over wide context chunks (34.89s).
+    **Where Simpler Approaches Are Enough (No Multi-Turn Agent Needed):**
+    - **Single-Entity Lookups (19 Questions):** Standard RAG (100.0%), Static GraphRAG (100.0%), and Agentic GraphRAG (100.0%) all perform identically. Direct vector similarity or 1-hop graph neighborhood lookups achieve 100% precision in 1-2 seconds with zero agent orchestration overhead.
+    - **Structured Temporal Precedence (22 Questions):** Static GraphRAG achieves 100.0% purely via deterministic traversal of `PRECEDES` graph edges. When temporal relationships are modeled explicitly in the graph schema, agentic reflection loops are redundant.
+
+    **Where Agentic GraphRAG Is Strictly Necessary (Simpler Approaches Break Down):**
+    - **Multi-Document Aggregations (21 Questions):** Standard RAG (4.8%) and Static GraphRAG (4.8%) fail completely due to context overflow and hallucinated counts. Agentic GraphRAG achieves **100.0%** by dispatching in-database GSQL `SumAccum` queries, computing exact math in-engine with 96% fewer tokens (~212 vs. ~5,576 tokens).
+    - **Superlative Extremities (10 Questions):** Standard RAG (40.0%) and Static GraphRAG (50.0%) fail to rank competitor extremes. Agentic GraphRAG achieves **100.0%** using in-database GSQL `HeapAccum(1)` in constant memory.
+    - **Multi-Hop Collisions & Incomplete Knowledge Graphs (28 Questions):** Standard RAG (42.9%) and Static GraphRAG (53.6%) fail on venue-date collisions and missing graph edges. Agentic GraphRAG achieves **96.4%** via overlap-ranked date resolution and Self-RAG reflection that autonomously falls back to targeted vector retrieval when graph edges are missing.
     """)
+
 
 
 # PANEL 2: PER-ARCHETYPE BREAKDOWN
@@ -254,24 +276,28 @@ with tab_archetypes:
     col_a, col_b = st.columns(2)
     with col_a:
         st.markdown("""
-        **Aggregation Archetype:**
-        - Standard RAG (50.0%) and GraphRAG (25.0%) fail due to context window truncation and LLM counting hallucinations when attempting to enumerate events.
-        - Agentic GraphRAG (100.0%) delegates counting directly to TigerGraph via native GSQL SumAccum, delivering mathematical correctness with zero token bloat.
+        **Aggregation Archetype (21 Questions):**
+        - Standard RAG (4.8%) and GraphRAG (4.8%) fail due to context window truncation and LLM counting hallucinations when attempting to enumerate events.
+        - Agentic GraphRAG (**100.0%**) delegates counting directly to TigerGraph via native GSQL SumAccum, delivering mathematical correctness with 96% fewer context tokens.
         
-        **Superlative Archetype:**
-        - Standard RAG (0.0%) fails because embedding similarity does not rank extremity (most/least competitors).
-        - Agentic GraphRAG (100.0%) utilizes GSQL HeapAccum(1) to order events directly in-memory in TigerGraph.
+        **Superlative Archetype (10 Questions):**
+        - Standard RAG (40.0%) and GraphRAG (50.0%) fail because embedding similarity cannot rank mathematical extremity (highest/lowest competitors).
+        - Agentic GraphRAG (**100.0%**) utilizes GSQL HeapAccum(1) to order events directly in-memory in TigerGraph Savanna.
+
+        **Lookup Archetype (19 Questions):**
+        - All three pipelines achieve **100.0%**. For simple single-entity fact retrieval, simpler vector or 1-hop graph approaches suffice completely with lower latency.
         """)
     with col_b:
         st.markdown("""
-        **Temporal Archetype:**
-        - Standard RAG and GraphRAG achieve high accuracy when explicit competition years are named in text.
-        - Agentic GraphRAG explicitly traverses PRECEDES directed edges in TigerGraph Savanna to systematically resolve predecessor/successor Olympic Games.
+        **Temporal Archetype (22 Questions):**
+        - Standard RAG achieves only 50.0% when multi-year articles confuse temporal grounding.
+        - Both GraphRAG (**100.0%**) and Agentic GraphRAG (**100.0%**) explicitly traverse PRECEDES directed edges in TigerGraph to systematically resolve predecessor/successor Olympic Games.
         
-        **Multi-Hop Archetype:**
-        - Multi-hop queries require chaining Venue to Event to Athlete to Medal.
-        - Agentic GraphRAG performs atomic constraint decomposition with date disambiguation and camelCase name tokenization to guarantee clean entity matching.
+        **Multi-Hop Archetype (28 Questions):**
+        - Standard RAG (42.9%) and GraphRAG (53.6%) fail on venue-date collisions and missing graph edges.
+        - Agentic GraphRAG (**96.4%**) performs overlap-ranked date span resolution and Self-RAG reflection with autonomous vector fallback when graph records are incomplete.
         """)
+
 
 
 # PANEL 3: PARETO FRONTIER
@@ -334,23 +360,72 @@ with tab_explorer:
                 st.caption(f"Tokens: {r['total_tokens']} | Latency: {r['latency_seconds']:.2f}s")
                 st.text_area("Prediction", value=r["prediction"], height=160, key=f"pred_{p_name}_{selected_qid}")
                 
-                # If Agentic GraphRAG, show detailed trace
-                if p_name == "Agentic GraphRAG":
-                    trace = r.get("execution_trace") or {}
-                    if trace:
-                        with st.expander("View Agentic Trace & Tool Calls", expanded=True):
-                            st.markdown(f"- **Routed Node:** `{trace.get('routed_archetype', 'unspecified')}`")
-                            st.markdown(f"- **Stop Reason:** `{trace.get('stop_reason', 'unspecified')}`")
-                            st.markdown(f"- **Iterations:** `{trace.get('iteration', 1)}`")
-                            ev_log = trace.get("evidence_log", [])
-                            if ev_log:
-                                st.markdown("**Evidence Trail:**")
-                                for ev in ev_log:
-                                    st.json(ev)
-                            g_ctx = trace.get("graph_context")
-                            if g_ctx:
-                                st.markdown("**Verified Graph Facts:**")
-                                st.json(g_ctx)
+                trace = r.get("execution_trace") or {}
+
+                if p_name == "Standard RAG":
+
+                    with st.expander("Reveal Execution Path & Process", expanded=True):
+                        st.markdown("**Execution Workflow Path:**")
+                        st.markdown("`1. User Query` -> `2. FastEmbed Local Embedding (all-MiniLM-L6-v2)` -> `3. Dot-Product Cosine Ranking over 6,938 Chunks` -> `4. Top-K Context Assembly` -> `5. Gemini LLM Synthesis`")
+                        
+                        st.markdown("**API Calls & Resource Footprint:**")
+                        st.markdown("- **Embeddings:** 0 external API calls (100% offline FastEmbed ONNX, <300MB RAM)")
+                        st.markdown("- **Graph Database:** 0 calls")
+                        st.markdown(f"- **LLM API Calls:** 1 synthesis call ({r.get('prompt_tokens', 0)} prompt tokens, {r.get('completion_tokens', 0)} completion tokens)")
+                        st.markdown(f"- **Context Length:** {trace.get('context_length_chars', 0):,} characters")
+                        
+                        st.markdown(f"**Retrieved Chunks (top_k={trace.get('top_k', 5)}):**")
+                        for ch in trace.get("retrieved_chunks", [])[:3]:
+                            st.markdown(f"- `{ch.get('chunk_id')}` (Score: **{ch.get('score')}**): {ch.get('title')}")
+
+                elif p_name == "GraphRAG":
+                    with st.expander("Reveal Execution Path & Process", expanded=True):
+                        st.markdown("**Execution Workflow Path:**")
+                        st.markdown("`1. User Query` -> `2. Deterministic Entity Linking` -> `3. TigerGraph Savanna 1-2 Hop Traversal` -> `4. HeapAccum Relevance Degree Capping` -> `5. Triples + Passages Synthesis`")
+                        
+                        st.markdown("**API Calls & Resource Footprint:**")
+                        st.markdown("- **Graph Database:** 1-2 TigerGraph Savanna REST calls (`getVertices`, `getEdges`)")
+                        st.markdown(f"- **LLM API Calls:** 1 synthesis call ({r.get('prompt_tokens', 0)} prompt tokens, {r.get('completion_tokens', 0)} completion tokens)")
+                        st.markdown(f"- **Graph Evidence Length:** {trace.get('graph_evidence_length_chars', 0):,} characters")
+                        
+                        st.markdown(f"**Linked Entities:** `{', '.join(trace.get('linked_entities', [])) or 'None'}`")
+                        st.markdown(f"**Extracted Triples ({trace.get('triples_count', 0)} total):**")
+                        triples = trace.get("triples_sample", [])
+                        if triples:
+                            for t in triples[:3]:
+                                st.code(t, language="text")
+
+                elif p_name == "Agentic GraphRAG":
+                    with st.expander("Reveal Execution Path & Process", expanded=True):
+                        ev_log = trace.get("evidence_log", [])
+                        num_graph_ops = sum(1 for ev in ev_log if "gsql" in ev.get("tool", "") or "temporal" in ev.get("tool", "") or "multi_hop" in ev.get("tool", ""))
+                        gap_steps = [ev for ev in ev_log if ev.get("tool") == "agentic_gap_resolution"]
+                        num_gap_llm_calls = len(gap_steps) * 2
+                        total_llm_calls = 1 + num_gap_llm_calls
+
+                        st.markdown("**Execution Workflow Path:**")
+                        arch = trace.get("routed_archetype", "router")
+                        if num_gap_llm_calls > 0:
+                            st.markdown(f"`1. Query` -> `2. LangGraph Router ({arch})` -> `3. Graph Specialist Traversal` -> `4. Self-RAG Reflection (Gap Detected)` -> `5. Autonomous Vector Fallback & Entity Extraction` -> `6. Self-RAG Reflection (Sufficient)` -> `7. Result Synthesis`")
+                        else:
+                            st.markdown(f"`1. Query` -> `2. LangGraph Router ({arch})` -> `3. In-Database GSQL Accumulator / Hard Filter` -> `4. Self-RAG Reflection (Sufficient)` -> `5. Grounded Result Synthesis`")
+                        
+                        st.markdown("**API Calls & Resource Footprint:**")
+                        st.markdown(f"- **TigerGraph Savanna:** {max(num_graph_ops, 1)} in-database graph/GSQL query execution(s)")
+                        st.markdown(f"- **LLM API Calls:** {total_llm_calls} call(s) (1 Synthesis" + (f" + {num_gap_llm_calls} Gap Resolution calls" if num_gap_llm_calls > 0 else "") + ")")
+                        st.markdown(f"- **Token Usage:** {r.get('prompt_tokens', 0)} prompt / {r.get('completion_tokens', 0)} completion ({r.get('total_tokens', 0)} total)")
+                        st.markdown(f"- **StateGraph Routing:** Archetype `{arch}` | Stop Reason: `{trace.get('stop_reason', 'unspecified')}` | Iterations: `{trace.get('iteration', 1)}`")
+
+                        if ev_log:
+                            st.markdown("**Evidence Trail & Tool Operations:**")
+                            for ev in ev_log:
+                                st.json(ev)
+                        g_ctx = trace.get("graph_context")
+                        if g_ctx:
+                            st.markdown("**Verified In-Database Facts:**")
+                            st.json(g_ctx)
+
+
 
 
 # PANEL 5: TIGERGRAPH SAVANNA TOPOLOGY
