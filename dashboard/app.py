@@ -115,23 +115,17 @@ def get_graph_live_stats() -> Dict[str, Any]:
 # Sidebar Controls
 st.sidebar.title("Configuration")
 
-# Find all result JSONL files across results and data/processed
+# Find public benchmark result files
 found_files = []
-for search_dir in ["results", "data/processed"]:
-    if os.path.exists(search_dir):
-        for root, _, files in os.walk(search_dir):
-            for f in files:
-                if f.endswith(".jsonl"):
-                    p = os.path.join(root, f).replace("\\", "/")
-                    found_files.append(p)
+if os.path.exists("results/public_100"):
+    for root, _, files in os.walk("results/public_100"):
+        for f in files:
+            if f.endswith(".jsonl"):
+                p = os.path.join(root, f).replace("\\", "/")
+                found_files.append(p)
 
 priority_order = [
-    "results/public_100/results_benchmark.jsonl",
-    "results/hidden_50/results_benchmark.jsonl",
-    "results/hidden_50/results_hidden_agentic.jsonl",
-    "results/hidden_50/results_hidden_graph_rag.jsonl",
-    "results/hidden_50/results_hidden_standard_rag.jsonl",
-    "results/hidden_50/submission_hidden_predictions.jsonl"
+    "results/public_100/results_benchmark.jsonl"
 ]
 
 all_options = []
@@ -153,7 +147,7 @@ st.sidebar.markdown("""
 - Backend: TigerGraph Savanna Cloud
 - Graph: Olympics (2,951 docs, 5,098 athletes)
 - Vector Index: FastEmbed ONNX (6,938 chunks)
-- LLM Provider: Google Gemini Multi-Key Pool (`gemini-3.5-flash-lite`)
+- LLM Provider: Google Gemini Multi-Key Pool (Primary)
 - Orchestration: LangGraph StateGraph (5 nodes)
 """)
 
@@ -172,15 +166,6 @@ if not records:
 df_raw = pd.DataFrame(records)
 pipeline_names = sorted(df_raw["pipeline_name"].unique())
 
-# Determine if the dataset is an unscored held-out evaluation set
-has_ground_truth = False
-if "ground_truth" in df_raw.columns:
-    has_ground_truth = df_raw["ground_truth"].apply(lambda x: len(x) if isinstance(x, list) else (1 if x else 0)).sum() > 0
-if not has_ground_truth and "accuracy_score" in df_raw.columns:
-    has_ground_truth = df_raw["accuracy_score"].sum() > 0
-
-is_held_out = not has_ground_truth
-
 # Tab Navigation
 tab_aggregate, tab_archetypes, tab_pareto, tab_explorer, tab_graph = st.tabs([
     "1. Aggregate Comparison",
@@ -193,10 +178,7 @@ tab_aggregate, tab_archetypes, tab_pareto, tab_explorer, tab_graph = st.tabs([
 # PANEL 1: AGGREGATE COMPARISON
 with tab_aggregate:
     st.subheader("Aggregate Performance Comparison")
-    if is_held_out:
-        st.info("Held-out evaluation set: Ground truth is held by judges for official scoring. Displaying measured token efficiency and execution latency across all 3 pipelines.")
-    else:
-        st.markdown("Relative comparison across accuracy, token consumption, and execution latency under identical underlying LLM models.")
+    st.markdown("Relative comparison across accuracy, token consumption, and execution latency under identical underlying LLM models.")
     
     col_cards = st.columns(len(pipeline_names))
     summary_data = []
@@ -204,70 +186,47 @@ with tab_aggregate:
     for i, p_name in enumerate(pipeline_names):
         p_df = df_raw[df_raw["pipeline_name"] == p_name]
         count = len(p_df)
-        acc = p_df["accuracy_score"].mean() * 100 if "accuracy_score" in p_df.columns else 0.0
-        comp = p_df["completeness_score"].mean() * 100 if "completeness_score" in p_df.columns else 0.0
+        acc = p_df["accuracy_score"].mean() * 100
+        comp = p_df["completeness_score"].mean() * 100
         avg_tokens = p_df["total_tokens"].mean()
         avg_latency = p_df["latency_seconds"].mean()
         
-        row_summary = {
+        summary_data.append({
             "Pipeline": p_name,
             "Questions Evaluated": count,
+            "Accuracy (%)": round(acc, 1),
+            "Completeness (%)": round(comp, 1),
             "Avg Tokens / Query": round(avg_tokens, 1),
             "Avg Latency (s)": round(avg_latency, 2)
-        }
-        if not is_held_out:
-            row_summary["Accuracy (%)"] = round(acc, 1)
-            row_summary["Completeness (%)"] = round(comp, 1)
-        summary_data.append(row_summary)
+        })
         
         with col_cards[i]:
-            if is_held_out:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">{p_name}</div>
-                    <div class="metric-value">{avg_tokens:,.0f} tok</div>
-                    <div class="metric-sub">Held-Out Set ({count} questions)</div>
-                    <div class="metric-sub">Avg Latency: {avg_latency:.2f}s</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">{p_name}</div>
-                    <div class="metric-value">{acc:.1f}%</div>
-                    <div class="metric-sub">Accuracy ({int(acc*count/100)}/{count} correct)</div>
-                    <div class="metric-sub">Tokens: {avg_tokens:,.1f} | Latency: {avg_latency:.2f}s</div>
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">{p_name}</div>
+                <div class="metric-value">{acc:.1f}%</div>
+                <div class="metric-sub">Accuracy ({int(acc*count/100)}/{count} correct)</div>
+                <div class="metric-sub">Tokens: {avg_tokens:,.1f} | Latency: {avg_latency:.2f}s</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     df_summary = pd.DataFrame(summary_data)
     st.dataframe(df_summary, use_container_width=True, hide_index=True)
     
     # Visual Comparison Charts
-    if not is_held_out:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.subheader("Accuracy Comparison (%)")
-            df_acc = df_summary[["Pipeline", "Accuracy (%)"]].set_index("Pipeline")
-            st.bar_chart(df_acc, color="#198754")
-        with c2:
-            st.subheader("Token Cost / Query")
-            df_tok = df_summary[["Pipeline", "Avg Tokens / Query"]].set_index("Pipeline")
-            st.bar_chart(df_tok, color="#0d6efd")
-        with c3:
-            st.subheader("Execution Latency (s)")
-            df_lat = df_summary[["Pipeline", "Avg Latency (s)"]].set_index("Pipeline")
-            st.bar_chart(df_lat, color="#6c757d")
-    else:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Token Cost / Query (Lower is More Efficient)")
-            df_tok = df_summary[["Pipeline", "Avg Tokens / Query"]].set_index("Pipeline")
-            st.bar_chart(df_tok, color="#0d6efd")
-        with c2:
-            st.subheader("Execution Latency (s)")
-            df_lat = df_summary[["Pipeline", "Avg Latency (s)"]].set_index("Pipeline")
-            st.bar_chart(df_lat, color="#6c757d")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.subheader("Accuracy Comparison (%)")
+        df_acc = df_summary[["Pipeline", "Accuracy (%)"]].set_index("Pipeline")
+        st.bar_chart(df_acc, color="#198754")
+    with c2:
+        st.subheader("Token Cost / Query")
+        df_tok = df_summary[["Pipeline", "Avg Tokens / Query"]].set_index("Pipeline")
+        st.bar_chart(df_tok, color="#0d6efd")
+    with c3:
+        st.subheader("Execution Latency (s)")
+        df_lat = df_summary[["Pipeline", "Avg Latency (s)"]].set_index("Pipeline")
+        st.bar_chart(df_lat, color="#6c757d")
 
     # Architectural Comparison: Where Simpler Suffices vs. Where Agentic Is Necessary
     st.subheader("Architectural Comparison: Where Simpler Suffices vs. Where Agentic Is Necessary")
@@ -299,11 +258,9 @@ with tab_archetypes:
         
         for p_name in pipeline_names:
             sub = df_raw[(df_raw["qtype"] == arch) & (df_raw["pipeline_name"] == p_name)]
-            acc = sub["accuracy_score"].mean() * 100 if len(sub) > 0 and "accuracy_score" in sub.columns else 0.0
-            if not is_held_out:
-                row[f"{p_name} Acc (%)"] = round(acc, 1)
+            acc = sub["accuracy_score"].mean() * 100 if len(sub) > 0 else 0.0
+            row[f"{p_name} Acc (%)"] = round(acc, 1)
             row[f"{p_name} Tokens"] = round(sub["total_tokens"].mean(), 1) if len(sub) > 0 else 0
-            row[f"{p_name} Latency (s)"] = round(sub["latency_seconds"].mean(), 2) if len(sub) > 0 else 0
         arch_rows.append(row)
         
     df_arch = pd.DataFrame(arch_rows)
@@ -339,41 +296,27 @@ with tab_archetypes:
 
 # PANEL 3: PARETO FRONTIER
 with tab_pareto:
-    if not is_held_out:
-        st.subheader("Accuracy vs. Token Cost (Pareto Frontier)")
-        st.markdown("Visualizing the efficiency frontier: Higher accuracy achieved at lower token expenditure demonstrates superior system design.")
-    else:
-        st.subheader("Execution Latency vs. Token Cost (Efficiency Frontier)")
-        st.markdown("Visualizing the efficiency frontier on held-out evaluation: Demonstrating token reduction and runtime efficiency across pipelines.")
+    st.subheader("Accuracy vs. Token Cost (Pareto Frontier)")
+    st.markdown("Visualizing the efficiency frontier: Higher accuracy achieved at lower token expenditure demonstrates superior system design.")
     
     pareto_points = []
     for p_name in pipeline_names:
         p_df = df_raw[df_raw["pipeline_name"] == p_name]
-        p_dict = {
+        pareto_points.append({
             "Pipeline": p_name,
+            "Accuracy (%)": p_df["accuracy_score"].mean() * 100,
             "Avg Tokens": p_df["total_tokens"].mean(),
             "Avg Latency (s)": p_df["latency_seconds"].mean()
-        }
-        if not is_held_out:
-            p_dict["Accuracy (%)"] = p_df["accuracy_score"].mean() * 100 if "accuracy_score" in p_df.columns else 0.0
-        pareto_points.append(p_dict)
+        })
     df_pareto = pd.DataFrame(pareto_points)
     
-    if not is_held_out:
-        st.scatter_chart(
-            data=df_pareto,
-            x="Avg Tokens",
-            y="Accuracy (%)",
-            color="Pipeline",
-            size="Avg Latency (s)"
-        )
-    else:
-        st.scatter_chart(
-            data=df_pareto,
-            x="Avg Latency (s)",
-            y="Avg Tokens",
-            color="Pipeline"
-        )
+    st.scatter_chart(
+        data=df_pareto,
+        x="Avg Tokens",
+        y="Accuracy (%)",
+        color="Pipeline",
+        size="Avg Latency (s)"
+    )
     
     st.markdown("""
     **Interpretation:**
@@ -396,10 +339,7 @@ with tab_explorer:
     
     st.markdown(f"**Query:** {sample_row['question']}")
     st.markdown(f"**Archetype:** `{sample_row.get('qtype', 'unknown')}` | **Question ID:** `{selected_qid}`")
-    if is_held_out:
-        st.markdown("**Ground Truth:** `Held-Out Evaluation (Official Judging)`")
-    else:
-        st.markdown(f"**Ground Truth:** `{sample_row['ground_truth']}`")
+    st.markdown(f"**Ground Truth:** `{sample_row['ground_truth']}`")
     
     cols = st.columns(len(pipeline_names))
     for i, p_name in enumerate(pipeline_names):
@@ -408,12 +348,8 @@ with tab_explorer:
             st.markdown(f"#### {p_name}")
             if not row_match.empty:
                 r = row_match.iloc[0]
-                if is_held_out:
-                    status_color = "#0d6efd"
-                    status_text = "EVALUATED (Held-Out)"
-                else:
-                    status_color = "green" if r.get("accuracy_score") == 1.0 else "red"
-                    status_text = "PASS (1.0)" if r.get("accuracy_score") == 1.0 else "FAIL (0.0)"
+                status_color = "green" if r["accuracy_score"] == 1.0 else "red"
+                status_text = "PASS (1.0)" if r["accuracy_score"] == 1.0 else "FAIL (0.0)"
                 st.markdown(f"Status: **<span style='color:{status_color};'>{status_text}</span>**", unsafe_allow_html=True)
                 st.caption(f"Tokens: {r['total_tokens']} | Latency: {r['latency_seconds']:.2f}s")
                 st.text_area("Prediction", value=r["prediction"], height=160, key=f"pred_{p_name}_{selected_qid}")
