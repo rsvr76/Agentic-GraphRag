@@ -38,29 +38,18 @@ desktop.ini
 trash/
 reference/
 
-# Large datasets & corpus dumps
+# Large datasets & raw corpus dumps
 Datasets/corpus/
-data/processed/*.npz
-data/processed/*.jsonl
-data/processed/*.parquet
-!data/processed/.gitkeep
-!data/processed/results_benchmark.jsonl
-!data/processed/results_hidden_agentic.jsonl
-!data/processed/submission_hidden_predictions.jsonl
 
-# Secret hidden evaluation ground truth
-data/secret_eval_hidden_solutions.jsonl
-data/secret_*.jsonl
-*secret_eval_hidden*
+# Local data cache, chunks, embeddings, and intermediate files (completely excluded from Git)
+data/
 
 # Temporary test, scratch, scripts, batches, and internal docs
 scratch/
 rerun_failed.py
-data/processed/rerun_*
 batches/
 **/batches/
 benchmark_v2/
-data/processed/benchmark_v2/
 skills-lock.json
 scripts/
 docs/
@@ -68,7 +57,7 @@ docs/
 # Documents
 *.md
 !README.md
-!data/processed/hidden_agentic_traces.md
+!results/**/*.md
 *.pdf
 *.doc
 *.docx

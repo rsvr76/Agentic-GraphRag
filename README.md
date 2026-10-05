@@ -1,4 +1,4 @@
-# TigerGraph Agentic GraphRAG: Autonomous Knowledge Navigator
+# Agentic GraphRag
 
 [![TigerGraph](https://img.shields.io/badge/Graph_Database-TigerGraph_Savanna-FF6B00?logo=tigergraph&logoColor=white)](https://www.tigergraph.com/)
 [![Protocol](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
@@ -10,7 +10,7 @@ An autonomous Agentic GraphRAG investigation system built on TigerGraph Savanna.
 
 ## Executive Summary
 
-Standard Retrieval-Augmented Generation (RAG) architectures fail when queries require synthesizing facts across dispersed documents, calculating exact aggregations, or resolving temporal sequences. TigerGraph Agentic GraphRAG replaces rigid single-pass retrieval with an autonomous orchestrator built on LangGraph and TigerGraph Savanna.
+Standard Retrieval-Augmented Generation (RAG) architectures fail when queries require synthesizing facts across dispersed documents, calculating exact aggregations, or resolving temporal sequences. Agentic GraphRag replaces rigid single-pass retrieval with an autonomous orchestrator built on LangGraph and TigerGraph Savanna.
 
 The system classifies inquiries into five distinct archetypes (lookup, aggregation, superlative, temporal, multi-hop), executes in-database GSQL accumulators (`SumAccum`, `HeapAccum`) to prevent context window explosion, traverses directed temporal edges (`PRECEDES`, `SUCCEEDS`), and employs Self-RAG reflection loops to autonomously detect evidentiary gaps and recover missing facts via grounded vector retrieval.
 
@@ -70,9 +70,9 @@ The held-out evaluation set of 50 questions (`eval-001` through `eval-050`) was 
 | **Execution Status** | 50/50 Completed |
 | **Average Tokens / Query** | 3,430.1 tokens |
 | **Average Latency / Query** | 7.50 seconds |
-| **Submission Output (Clean)** | `data/processed/submission_hidden_predictions.jsonl` (Strictly `qid`, `question`, `qtype`, `prediction` without answers) |
-| **Full Trace Output** | `data/processed/results_hidden_agentic.jsonl` (Complete step logs and token accounting) |
-| **Human-Readable Audit** | `data/processed/hidden_agentic_traces.md` |
+| **Submission Output (Clean)** | `results/hidden_50/submission_hidden_predictions.jsonl` (Strictly `qid`, `question`, `qtype`, `prediction` without answers) |
+| **Full Trace Output** | `results/hidden_50/results_hidden_agentic.jsonl` (Complete step logs and token accounting) |
+| **Human-Readable Audit** | `results/hidden_50/hidden_agentic_traces.md` |
 
 ## System Architecture
 
@@ -200,13 +200,13 @@ PRIMARY_LLM_PROVIDER=gemini
 #### Run the 100-Question 3-Way Comparative Benchmark
 Executes Standard RAG, Static GraphRAG, and Agentic GraphRAG across the 100 public questions:
 ```bash
-python -m src.evaluation.runner
+python -m src.evaluation.runner --output results/public_100/results_benchmark.jsonl
 ```
 
 #### Run the 50-Question Hidden Test Evaluation
 Runs autonomous Agentic GraphRAG over the held-out evaluation set and generates submission files:
 ```bash
-python -m src.evaluation.runner --input Datasets/questions/eval_hidden.jsonl --pipelines agentic_graphrag --output data/processed/results_hidden_agentic.jsonl --report data/processed/hidden_agentic_traces.md
+python -m src.evaluation.runner --input Datasets/questions/eval_hidden.jsonl --pipelines agentic_graphrag --output results/hidden_50/results_hidden_agentic.jsonl --report results/hidden_50/hidden_agentic_traces.md
 ```
 
 #### Launch the Interactive Metrics Dashboard Locally
@@ -214,7 +214,7 @@ View the 5 comparative panels, Pareto frontier, and execution path expanders:
 ```bash
 streamlit run dashboard/app.py
 ```
-*(The dashboard runs completely out-of-the-box using the pre-computed benchmark results in `data/processed/results_benchmark.jsonl`).*
+*(The dashboard runs completely out-of-the-box using the pre-computed benchmark results in `results/public_100/results_benchmark.jsonl`).*
 
 
 ## Repository Structure
@@ -230,9 +230,10 @@ TigerGraph/
 │       └── eval_hidden.jsonl                    # 50 held-out hidden evaluation questions
 ├── dashboard/
 │   └── app.py                                   # Streamlit metrics dashboard & execution visualizer
-├── data/
-│   └── processed/
-│       ├── results_benchmark.jsonl              # Canonical 300-record benchmark (99.0% Agentic)
+├── results/
+│   ├── public_100/
+│   │   └── results_benchmark.jsonl              # Canonical 300-record benchmark (99.0% Agentic)
+│   └── hidden_50/
 │       ├── submission_hidden_predictions.jsonl  # Clean 50 hidden predictions for grading
 │       ├── results_hidden_agentic.jsonl         # Detailed 50 hidden evaluation traces
 │       └── hidden_agentic_traces.md             # Markdown trace audit for hidden evaluation

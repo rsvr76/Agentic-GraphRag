@@ -17,7 +17,7 @@ import numpy as np
 
 # Page Configuration
 st.set_page_config(
-    page_title="TigerGraph Agentic GraphRAG — Benchmark Dashboard",
+    page_title="Agentic GraphRag — Benchmark Dashboard",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded"
@@ -115,24 +115,24 @@ def get_graph_live_stats() -> Dict[str, Any]:
 # Sidebar Controls
 st.sidebar.title("Configuration")
 
-# Find all result JSONL files across data/processed
+# Find all result JSONL files across results and data/processed
 found_files = []
-if os.path.exists("data/processed"):
-    for root, _, files in os.walk("data/processed"):
-        for f in files:
-            if f.endswith(".jsonl"):
-                p = os.path.join(root, f).replace("\\", "/")
-                found_files.append(p)
+for search_dir in ["results", "data/processed"]:
+    if os.path.exists(search_dir):
+        for root, _, files in os.walk(search_dir):
+            for f in files:
+                if f.endswith(".jsonl"):
+                    p = os.path.join(root, f).replace("\\", "/")
+                    found_files.append(p)
 
 priority_order = [
+    "results/public_100/results_benchmark.jsonl",
+    "results/hidden_50/results_hidden_agentic.jsonl",
+    "results/hidden_50/submission_hidden_predictions.jsonl",
     "data/processed/results_benchmark.jsonl",
-    "data/processed/benchmark_v2/results_benchmark.jsonl",
     "data/processed/results_hidden_agentic.jsonl",
-    "data/processed/submission_hidden_predictions.jsonl",
-    "data/processed/results_checkpoint.jsonl"
+    "data/processed/submission_hidden_predictions.jsonl"
 ]
-
-
 
 all_options = []
 for p in priority_order:
@@ -143,7 +143,7 @@ for p in sorted(found_files):
         all_options.append(p)
 
 if not all_options:
-    all_options = ["data/processed/results_benchmark.jsonl"]
+    all_options = ["results/public_100/results_benchmark.jsonl"]
 
 selected_file = st.sidebar.selectbox("Evaluation Results File", all_options, index=0)
 
@@ -161,7 +161,7 @@ st.sidebar.markdown("""
 records = load_results_file(selected_file)
 
 # Header Section
-st.title("TigerGraph Agentic GraphRAG — Evaluation & Live Dashboard")
+st.title("Agentic GraphRag — Evaluation & Live Dashboard")
 st.caption("Empirical 3-Way Comparative Benchmark: Standard Dense RAG vs. Static GraphRAG vs. Autonomous Agentic GraphRAG")
 
 if not records:
