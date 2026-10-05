@@ -127,11 +127,11 @@ for search_dir in ["results", "data/processed"]:
 
 priority_order = [
     "results/public_100/results_benchmark.jsonl",
+    "results/hidden_50/results_benchmark.jsonl",
     "results/hidden_50/results_hidden_agentic.jsonl",
-    "results/hidden_50/submission_hidden_predictions.jsonl",
-    "data/processed/results_benchmark.jsonl",
-    "data/processed/results_hidden_agentic.jsonl",
-    "data/processed/submission_hidden_predictions.jsonl"
+    "results/hidden_50/results_hidden_graph_rag.jsonl",
+    "results/hidden_50/results_hidden_standard_rag.jsonl",
+    "results/hidden_50/submission_hidden_predictions.jsonl"
 ]
 
 all_options = []

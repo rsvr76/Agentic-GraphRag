@@ -58,6 +58,9 @@ docs/
 *.md
 !README.md
 !results/**/*.md
+MEMORY.md
+LOGS.md
+report.md
 *.pdf
 *.doc
 *.docx

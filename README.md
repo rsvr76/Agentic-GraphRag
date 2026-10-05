@@ -62,19 +62,20 @@ A primary objective of this comparative benchmark is establishing the precise ar
 ## 50-Question Hidden Test Set Evaluation (`eval_hidden.jsonl`)
 
 
-The held-out evaluation set of 50 questions (`eval-001` through `eval-050`) was executed through the autonomous Agentic GraphRAG pipeline:
+The held-out evaluation set of 50 questions (`eval-001` through `eval-050`) was executed across all three comparative pipelines (150 total evaluations):
 
-| Evaluation Metric | Measured Result |
-| :--- | :--- |
-| **Evaluated Questions** | 50 questions (`eval-001` through `eval-050`) |
-| **Execution Status** | 50/50 Completed |
-| **Average Tokens / Query** | 3,430.1 tokens |
-| **Average Latency / Query** | 7.50 seconds |
-| **Evaluation Deliverable (JSON)** | `results/hidden_50/hidden_50_evaluation_results.json` (Structured JSON array: answers generated, tokens used, agentic traces) |
-| **Evaluation Deliverable (CSV)** | `results/hidden_50/hidden_50_evaluation_results.csv` (Tabular CSV: answers generated, tokens used, agentic traces) |
-| **Submission Output (Clean JSONL)** | `results/hidden_50/submission_hidden_predictions.jsonl` (Strictly `qid`, `question`, `qtype`, `prediction` without answers) |
-| **Full Trace Output (JSONL)** | `results/hidden_50/results_hidden_agentic.jsonl` (Complete step logs and token accounting) |
-| **Human-Readable Audit** | `results/hidden_50/hidden_agentic_traces.md` |
+| Pipeline | Questions | Avg Tokens / Query | Avg Latency (s) | Evaluation Deliverable |
+| :--- | :---: | :---: | :---: | :--- |
+| **Standard RAG** | 50 | 6,048.2 | 3.10 | `results/hidden_50/results_hidden_standard_rag.jsonl` |
+| **Static GraphRAG** | 50 | 5,113.3 | 4.18 | `results/hidden_50/results_hidden_graph_rag.jsonl` |
+| **Agentic GraphRAG (Ours)** | 50 | **3,430.1** | 7.50 | `results/hidden_50/results_hidden_agentic.jsonl` |
+
+### Key Deliverables for Hidden Test Evaluation
+- **Unified 3-Way Benchmark:** `results/hidden_50/results_benchmark.jsonl` (All 150 evaluations across the 3 pipelines for side-by-side dashboard inspection)
+- **Comparative Deliverable (JSON):** `results/hidden_50/hidden_50_evaluation_results.json` (Structured JSON array: comparative answers, tokens used, and agentic traces)
+- **Comparative Deliverable (CSV):** `results/hidden_50/hidden_50_evaluation_results.csv` (Tabular CSV: comparative answers, tokens used, and agentic traces)
+- **Submission Output (Clean JSONL):** `results/hidden_50/submission_hidden_predictions.jsonl` (Strictly `qid`, `question`, `qtype`, `prediction` without answers)
+- **Human-Readable Audit:** `results/hidden_50/hidden_agentic_traces.md` (Step-by-step trace report)
 
 ## System Architecture
 
@@ -236,10 +237,13 @@ TigerGraph/
 │   ├── public_100/
 │   │   └── results_benchmark.jsonl              # Canonical 300-record benchmark (99.0% Agentic)
 │   └── hidden_50/
-│       ├── hidden_50_evaluation_results.json    # Structured JSON array: answers, tokens, agentic trace
-│       ├── hidden_50_evaluation_results.csv     # Tabular CSV: answers, tokens, agentic trace
+│       ├── results_benchmark.jsonl              # Unified 150-record 3-way hidden benchmark
+│       ├── hidden_50_evaluation_results.json    # Comparative JSON: answers, tokens, agentic trace
+│       ├── hidden_50_evaluation_results.csv     # Comparative CSV: answers, tokens, agentic trace
 │       ├── submission_hidden_predictions.jsonl  # Clean 50 hidden predictions for grading
-│       ├── results_hidden_agentic.jsonl         # Detailed 50 hidden evaluation traces
+│       ├── results_hidden_agentic.jsonl         # Agentic GraphRAG hidden evaluation traces
+│       ├── results_hidden_graph_rag.jsonl       # Static GraphRAG hidden evaluation traces
+│       ├── results_hidden_standard_rag.jsonl    # Standard RAG hidden evaluation traces
 │       └── hidden_agentic_traces.md             # Markdown trace audit for hidden evaluation
 ├── src/
 │   ├── config.py                                # Pydantic Settings configuration manager
