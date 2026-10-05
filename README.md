@@ -70,8 +70,10 @@ The held-out evaluation set of 50 questions (`eval-001` through `eval-050`) was 
 | **Execution Status** | 50/50 Completed |
 | **Average Tokens / Query** | 3,430.1 tokens |
 | **Average Latency / Query** | 7.50 seconds |
-| **Submission Output (Clean)** | `results/hidden_50/submission_hidden_predictions.jsonl` (Strictly `qid`, `question`, `qtype`, `prediction` without answers) |
-| **Full Trace Output** | `results/hidden_50/results_hidden_agentic.jsonl` (Complete step logs and token accounting) |
+| **Evaluation Deliverable (JSON)** | `results/hidden_50/hidden_50_evaluation_results.json` (Structured JSON array: answers generated, tokens used, agentic traces) |
+| **Evaluation Deliverable (CSV)** | `results/hidden_50/hidden_50_evaluation_results.csv` (Tabular CSV: answers generated, tokens used, agentic traces) |
+| **Submission Output (Clean JSONL)** | `results/hidden_50/submission_hidden_predictions.jsonl` (Strictly `qid`, `question`, `qtype`, `prediction` without answers) |
+| **Full Trace Output (JSONL)** | `results/hidden_50/results_hidden_agentic.jsonl` (Complete step logs and token accounting) |
 | **Human-Readable Audit** | `results/hidden_50/hidden_agentic_traces.md` |
 
 ## System Architecture
@@ -234,6 +236,8 @@ TigerGraph/
 │   ├── public_100/
 │   │   └── results_benchmark.jsonl              # Canonical 300-record benchmark (99.0% Agentic)
 │   └── hidden_50/
+│       ├── hidden_50_evaluation_results.json    # Structured JSON array: answers, tokens, agentic trace
+│       ├── hidden_50_evaluation_results.csv     # Tabular CSV: answers, tokens, agentic trace
 │       ├── submission_hidden_predictions.jsonl  # Clean 50 hidden predictions for grading
 │       ├── results_hidden_agentic.jsonl         # Detailed 50 hidden evaluation traces
 │       └── hidden_agentic_traces.md             # Markdown trace audit for hidden evaluation
