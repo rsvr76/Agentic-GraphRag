@@ -370,13 +370,9 @@
     "question": "According to the provided corpus, how many cross-country skiing events at the 2010 Winter Olympics had more than 62 competitors?",
     "qtype": "aggregation",
     "agentic_graphrag": {
-      "answer_generated": "According to the verified database result, there were 0 cross-country skiing events at the 2010 Winter Olympics that had more than 62 competitors.",
-      "tokens_used": {
-        "prompt_tokens": 166,
-        "completion_tokens": 34,
-        "total_tokens": 200
-      },
-      "latency_seconds": 1.186,
+      "answer_generated": "According to the provided corpus, there were 4 cross-country skiing events at the 2010 Winter Olympics that had more than 62 competitors.",
+      "tokens_used": 223,
+      "latency_seconds": 1.78,
       "agentic_trace": {
         "strategy": "langgraph_orchestration",
         "routed_archetype": "aggregation",
@@ -3727,13 +3723,9 @@
     "question": "Who won the gold medal in the event held at Olympic Stadium on 6–9 August at the 2012 Summer Olympics?",
     "qtype": "multi_hop",
     "agentic_graphrag": {
-      "answer_generated": "Based on the events held at the Olympic Stadium between 6–9 August at the 2012 Summer Olympics, the following gold medals were won:\n\n- **Women's 100 metres hurdles** (held 6–7 August): **Sally Pearson** (Australia) [Q1827915::c0]\n- **Men's discus throw** (held 6–7 August): **Robert Harting** (Germany) [Q765839::c0]\n- **Women's javelin throw** (held 7–9 August): **Barbora Špotáková** (Czech Republic) [Q2000939::c0]\n- **Men's 200 metres** (held 7–9 August): **Usain Bolt** (Jamaica) [Q1649415::c0]\n- **Men's pole vault** (held 8–10 August): **Renaud Lavillenie** (France) [Q2000968::c0]\n- **Women's hammer throw** (held 8–10 August): **Anita Włodarczyk** (Poland) — *promoted following the disqualification of Tatyana Lysenko* [Q2069991::c0]\n- **Men's javelin throw** (held 8–11 August): **Keshorn Walcott** (Trinidad and Tobago) [Q1986718::c0]",
-      "tokens_used": {
-        "prompt_tokens": 28107,
-        "completion_tokens": 335,
-        "total_tokens": 28442
-      },
-      "latency_seconds": 89.979,
+      "answer_generated": "Based on the verified graph facts and supporting context, the gold medal in the men's 800 metres event (Athletics at the 2012 Summer Olympics – Men's 800 metres) held at the Olympic Stadium on 6–9 August 2012 was won by **David Rudisha** of Kenya [Q1049551::c0].",
+      "tokens_used": 3402,
+      "latency_seconds": 17.77,
       "agentic_trace": {
         "strategy": "langgraph_orchestration",
         "routed_archetype": "multi_hop",

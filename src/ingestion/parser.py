@@ -55,7 +55,7 @@ def parse_document(raw_doc: Dict[str, Any]) -> ParsedEventDocument:
     text = raw_doc.get("text", "")
     title = raw_doc.get("title", "")
 
-    sport_match = re.match(r"^([^–\-]+?)\s+at the\s+\d{4}", title)
+    sport_match = re.match(r"^(.+?)\s+at the\s+\d{4}", title)
     sport = sport_match.group(1).strip() if sport_match else None
 
     event_name = extract_infobox_field(text, "event") or title

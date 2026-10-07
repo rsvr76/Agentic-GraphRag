@@ -1,6 +1,6 @@
-"""Pipeline 3: Autonomous Agentic GraphRAG System (Core Graded Deliverable).
+"""Pipeline 3: Autonomous Agentic GraphRAG System.
 
-Implements Section 10 of Final Plan (v3) & solution.md:
+System architecture:
 1. Dynamic LangGraph StateGraph orchestrator.
 2. Question Archetype Classification as first move (lookup, aggregation, superlative, temporal, multi_hop).
 3. In-database GSQL Accumulators (SumAccum, HeapAccum) for exact aggregations and superlatives.
@@ -34,6 +34,15 @@ def _merge_unique_chunks(
     for c in new:
         seen[c["chunk_id"]] = c
     return list(seen.values())
+
+
+def _normalize_dashes(text: str) -> str:
+    """Normalize Unicode dashes (en-dash, em-dash, minus) to ASCII hyphen."""
+    if not text:
+        return ""
+    return text.replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-")
+
+
 
 
 ALL_CORPUS_SPORTS = [
@@ -224,21 +233,37 @@ class AgenticGraphRAGPipeline:
             event_titles = [e.get("v_id", "") for e in events]
             chunks = self._find_chunks_for_titles(event_titles)
             
-            if count == 0 and self.events:
+            if count == 0:
                 cached_matches = []
-                for title, attrs in self.events.items():
-                    t_lower = title.lower()
-                    if comp_name.lower() in t_lower:
-                        ev_sport = attrs.get("sport", "").lower()
-                        if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
-                            c_num = attrs.get("competitors")
-                            if c_num and isinstance(c_num, (int, float)) and c_num > threshold:
-                                cached_matches.append(f"{title} ({c_num} competitors)")
-                                event_titles.append(title)
+                cached_titles = []
+                if self.events:
+                    for title, attrs in self.events.items():
+                        t_lower = _normalize_dashes(title).lower()
+                        if comp_name.lower() in t_lower:
+                            ev_sport = attrs.get("sport", "").lower()
+                            if not sport or sport.lower() in ev_sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
+                                c_num = attrs.get("competitors")
+                                if c_num and isinstance(c_num, (int, float)) and c_num > threshold:
+                                    cached_matches.append(f"{title} ({c_num} competitors)")
+                                    cached_titles.append(title)
+                if not cached_matches and self.title_to_chunks:
+                    for title, c_list in self.title_to_chunks.items():
+                        t_lower = _normalize_dashes(title).lower()
+                        if comp_name.lower() in t_lower:
+                            if not sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
+                                for c in c_list:
+                                    text = c.get("text", "")
+                                    m_comp = re.search(r"competitors:\s*(\d+)", text, re.IGNORECASE)
+                                    if m_comp:
+                                        c_num = int(m_comp.group(1))
+                                        if c_num > threshold:
+                                            cached_matches.append(f"{title} ({c_num} competitors)")
+                                            cached_titles.append(title)
+                                        break
                 if cached_matches:
                     count = len(cached_matches)
-                    chunks = self._find_chunks_for_titles(event_titles)
-                    events = [{"v_id": t, "attributes": {"Events.competitors": c}} for t, c in zip(event_titles, [attrs.get("competitors") for attrs in self.events.values()])]
+                    chunks = self._find_chunks_for_titles(cached_titles)
+                    events = [{"v_id": t, "attributes": {"Events.competitors": c}} for t, c in zip(cached_titles, [re.search(r"\((\d+) competitors\)", cm).group(1) for cm in cached_matches])]
 
             evidence = {
                 "tool": "gsql_sumaccum",
@@ -256,35 +281,49 @@ class AgenticGraphRAGPipeline:
                 "stop_reason": "sufficient_evidence"
             }
         except Exception as e:
+            cached_matches = []
+            cached_titles = []
             if self.events:
-                cached_matches = []
-                cached_titles = []
                 for title, attrs in self.events.items():
-                    t_lower = title.lower()
+                    t_lower = _normalize_dashes(title).lower()
                     if comp_name.lower() in t_lower:
                         ev_sport = attrs.get("sport", "").lower()
-                        if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                        if not sport or sport.lower() in ev_sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
                             c_num = attrs.get("competitors")
                             if c_num and isinstance(c_num, (int, float)) and c_num > threshold:
                                 cached_matches.append(f"{title} ({c_num} competitors)")
                                 cached_titles.append(title)
-                if cached_matches:
-                    chunks = self._find_chunks_for_titles(cached_titles)
-                    evidence = {
-                        "tool": "graph_cache_fallback",
-                        "result_count": len(cached_matches),
-                        "matching_events": cached_matches,
-                        "competition": comp_name,
-                        "threshold": threshold,
-                        "sport": sport
-                    }
-                    return {
-                        "graph_context": evidence,
-                        "vector_context": chunks[:3],
-                        "evidence_log": [evidence],
-                        "is_sufficient": True,
-                        "stop_reason": "sufficient_evidence"
-                    }
+            if not cached_matches and self.title_to_chunks:
+                for title, c_list in self.title_to_chunks.items():
+                    t_lower = _normalize_dashes(title).lower()
+                    if comp_name.lower() in t_lower:
+                        if not sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
+                            for c in c_list:
+                                text = c.get("text", "")
+                                m_comp = re.search(r"competitors:\s*(\d+)", text, re.IGNORECASE)
+                                if m_comp:
+                                    c_num = int(m_comp.group(1))
+                                    if c_num > threshold:
+                                        cached_matches.append(f"{title} ({c_num} competitors)")
+                                        cached_titles.append(title)
+                                    break
+            if cached_matches:
+                chunks = self._find_chunks_for_titles(cached_titles)
+                evidence = {
+                    "tool": "graph_cache_fallback",
+                    "result_count": len(cached_matches),
+                    "matching_events": cached_matches,
+                    "competition": comp_name,
+                    "threshold": threshold,
+                    "sport": sport
+                }
+                return {
+                    "graph_context": evidence,
+                    "vector_context": chunks[:3],
+                    "evidence_log": [evidence],
+                    "is_sufficient": True,
+                    "stop_reason": "sufficient_evidence"
+                }
             return {"is_sufficient": False, "gap_description": f"Aggregation GSQL failed: {e}"}
 
     def _superlative_node(self, state: AgentState) -> Dict[str, Any]:
@@ -323,22 +362,37 @@ class AgenticGraphRAGPipeline:
             comp_cnt = top_event.get("competitors", 0)
 
             if not ev_name:
-                # Fast fallback to in-memory graph cache
+                # Fast fallback to in-memory graph cache and indexed corpus chunks
+                candidates = []
                 if self.events:
-                    candidates = []
                     for title, attrs in self.events.items():
-                        t_lower = title.lower()
+                        t_lower = _normalize_dashes(title).lower()
                         if comp_name.lower() in t_lower:
                             ev_sport = attrs.get("sport", "").lower()
-                            if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                            if not sport or sport.lower() in ev_sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
                                 c_num = attrs.get("competitors")
                                 if c_num and isinstance(c_num, (int, float)) and c_num > 0:
                                     candidates.append((c_num, title, attrs.get("name", title)))
-                    if candidates:
-                        candidates.sort(key=lambda x: x[0], reverse=find_max)
-                        comp_cnt = candidates[0][0]
-                        full_title = candidates[0][1]
-                        ev_name = candidates[0][2]
+                if not candidates and self.title_to_chunks:
+                    for title, c_list in self.title_to_chunks.items():
+                        t_lower = _normalize_dashes(title).lower()
+                        if comp_name.lower() in t_lower:
+                            if not sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
+                                for c in c_list:
+                                    text = c.get("text", "")
+                                    m_comp = re.search(r"competitors:\s*(\d+)", text, re.IGNORECASE)
+                                    if m_comp:
+                                        c_num = int(m_comp.group(1))
+                                        if c_num > 0:
+                                            m_ev = re.search(r"event:\s*(.+)", text, re.IGNORECASE)
+                                            ev_n = m_ev.group(1).strip() if m_ev else title
+                                            candidates.append((c_num, title, ev_n))
+                                        break
+                if candidates:
+                    candidates.sort(key=lambda x: x[0], reverse=find_max)
+                    comp_cnt = candidates[0][0]
+                    full_title = candidates[0][1]
+                    ev_name = candidates[0][2]
 
             if not ev_name:
                 gap = f"No {sport or 'matching'} events with competitors > 0 found under competition '{comp_name}'."
@@ -367,38 +421,53 @@ class AgenticGraphRAGPipeline:
                 "stop_reason": "sufficient_evidence"
             }
         except Exception as e:
-            # Fallback to in-memory graph cache on any GSQL error or timeout
+            # Fallback to in-memory graph cache and indexed corpus chunks on any GSQL error or timeout
+            candidates = []
             if self.events:
-                candidates = []
                 for title, attrs in self.events.items():
-                    t_lower = title.lower()
+                    t_lower = _normalize_dashes(title).lower()
                     if comp_name.lower() in t_lower:
                         ev_sport = attrs.get("sport", "").lower()
-                        if not sport or sport.lower() in ev_sport or sport.lower() in t_lower:
+                        if not sport or sport.lower() in ev_sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
                             c_num = attrs.get("competitors")
                             if c_num and isinstance(c_num, (int, float)) and c_num > 0:
                                 candidates.append((c_num, title, attrs.get("name", title)))
-                if candidates:
-                    candidates.sort(key=lambda x: x[0], reverse=find_max)
-                    comp_cnt = candidates[0][0]
-                    full_title = candidates[0][1]
-                    ev_name = candidates[0][2]
-                    chunks = self._find_chunks_for_titles([full_title or ev_name])
-                    evidence = {
-                        "tool": "graph_cache_fallback",
-                        "superlative_event": ev_name,
-                        "full_event_title": full_title,
-                        "competitors": comp_cnt,
-                        "competition": comp_name,
-                        "sport": sport
-                    }
-                    return {
-                        "graph_context": evidence,
-                        "vector_context": chunks[:3],
-                        "evidence_log": [evidence],
-                        "is_sufficient": True,
-                        "stop_reason": "sufficient_evidence"
-                    }
+            if not candidates and self.title_to_chunks:
+                for title, c_list in self.title_to_chunks.items():
+                    t_lower = _normalize_dashes(title).lower()
+                    if comp_name.lower() in t_lower:
+                        if not sport or t_lower.startswith(sport.lower() + " at the") or f"{sport.lower()} at the" in t_lower:
+                            for c in c_list:
+                                text = c.get("text", "")
+                                m_comp = re.search(r"competitors:\s*(\d+)", text, re.IGNORECASE)
+                                if m_comp:
+                                    c_num = int(m_comp.group(1))
+                                    if c_num > 0:
+                                        m_ev = re.search(r"event:\s*(.+)", text, re.IGNORECASE)
+                                        ev_n = m_ev.group(1).strip() if m_ev else title
+                                        candidates.append((c_num, title, ev_n))
+                                    break
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=find_max)
+                comp_cnt = candidates[0][0]
+                full_title = candidates[0][1]
+                ev_name = candidates[0][2]
+                chunks = self._find_chunks_for_titles([full_title or ev_name])
+                evidence = {
+                    "tool": "graph_cache_fallback",
+                    "superlative_event": ev_name,
+                    "full_event_title": full_title,
+                    "competitors": comp_cnt,
+                    "competition": comp_name,
+                    "sport": sport
+                }
+                return {
+                    "graph_context": evidence,
+                    "vector_context": chunks[:3],
+                    "evidence_log": [evidence],
+                    "is_sufficient": True,
+                    "stop_reason": "sufficient_evidence"
+                }
             return {"is_sufficient": False, "gap_description": f"Superlative GSQL failed: {e}"}
 
 
@@ -415,10 +484,7 @@ class AgenticGraphRAGPipeline:
 
         anchor_year = before_match.group(1)
 
-        # Determine season: prefer explicit mention, otherwise probe the live graph to
-        # find which season's competition actually exists for this year.
-        # This eliminates the previous silent "Winter" default which would silently
-        # return wrong results when neither "summer" nor "winter" appears in the question.
+        # Determine season: check explicit mention, or probe graph for competition
         if "summer" in q_lower:
             seasons_to_try = ["Summer"]
         elif "winter" in q_lower:
@@ -561,15 +627,17 @@ class AgenticGraphRAGPipeline:
             return {"is_sufficient": False, "gap_description": "Could not bind venue"}
 
         months = 'January|February|March|April|May|June|July|August|September|October|November|December'
+        q_normed = _normalize_dashes(q)
+        q_lower = q_normed.lower()
         date_pattern = rf"(\d{{1,2}}(?:\s*(?:to|–|-)\s*\d{{1,2}})?\s+(?:{months})(?:\s+\d{{4}})?|(?:{months})\s+\d{{1,2}}(?:,\s*\d{{4}}|\s+\d{{4}})?)"
-        date_match = re.search(date_pattern, q, re.IGNORECASE)
-        date_query = date_match.group(1).lower() if date_match else ""
+        date_match = re.search(date_pattern, q_normed, re.IGNORECASE)
+        date_query = _normalize_dashes(date_match.group(1).lower()) if date_match else ""
 
         # Extract full date span to capture compound date ranges and tournament stages
         full_date_span = date_query
-        on_after = re.search(r"\bon\s+(.+?)(?:\s*\?\s*$|\s*$)", q, re.IGNORECASE)
+        on_after = re.search(r"\bon\s+(.+?)(?:\s*\?\s*$|\s*$)", q_normed, re.IGNORECASE)
         if on_after:
-            candidate_span = on_after.group(1).strip().lower()
+            candidate_span = _normalize_dashes(on_after.group(1).strip().lower())
             if len(candidate_span) > len(full_date_span):
                 full_date_span = candidate_span
 
@@ -577,8 +645,8 @@ class AgenticGraphRAGPipeline:
             """Bigram character-overlap ratio between stored date_held and query date span."""
             if not date_held or not span:
                 return 0.0
-            dh = date_held.lower().strip()
-            sp = span.lower().strip()
+            dh = _normalize_dashes(date_held).lower().strip()
+            sp = _normalize_dashes(span).lower().strip()
             if dh == sp:
                 return 1.0
             if sp in dh or dh in sp:
@@ -626,7 +694,7 @@ class AgenticGraphRAGPipeline:
                         if ae.get("e_type") == "WON_MEDAL" and ae.get("to_id") == "gold" and ae.get("attributes", {}).get("event_id") == ev:
                             winners.append(ath_name)
                             m_attrs = ae.get("attributes", {})
-                            d_held = m_attrs.get("date_held", "").lower()
+                            d_held = _normalize_dashes(m_attrs.get("date_held", "")).lower()
                             if date_query and d_held and (date_query in d_held or d_held in date_query or d_held in q_lower):
                                 ev_date_match = True
                                 overlap = _date_overlap_score(d_held, full_date_span)
@@ -657,11 +725,33 @@ class AgenticGraphRAGPipeline:
             for ev in matched_no_winner_events:
                 ev_chunks = self._find_chunks_for_titles([ev])
                 for chunk in ev_chunks[:1]:
-                    if full_date_span in chunk.get("text", "").lower():
+                    if full_date_span in _normalize_dashes(chunk.get("text", "")).lower():
                         target_event = ev
                         gold_winners = []
                         break
                 if not gold_winners:
+                    break
+
+        # Fallback to indexed corpus infobox chunks if graph edges did not resolve a winner
+        if not gold_winners:
+            cands_to_check = candidate_events if candidate_events else [
+                t for t, clist in self.title_to_chunks.items()
+                if (not year_filter or year_filter in t) and any(matched_venue.lower() in c.get("text", "").lower() for c in clist)
+            ]
+            for ev in cands_to_check:
+                ev_chunks = self._find_chunks_for_titles([ev])
+                for chunk in ev_chunks:
+                    text = chunk.get("text", "")
+                    m_date = re.search(r"dates?:\s*(.+)", text, re.IGNORECASE)
+                    if m_date:
+                        d_held = _normalize_dashes(m_date.group(1)).lower()
+                        if (date_query and (date_query in d_held or d_held in date_query)) or (full_date_span and _date_overlap_score(d_held, full_date_span) > 0.5):
+                            m_gold = re.search(r"gold:\s*(.+)", text, re.IGNORECASE)
+                            if m_gold:
+                                gold_winners = [m_gold.group(1).strip()]
+                                target_event = ev
+                                break
+                if gold_winners:
                     break
 
         chunks = self._find_chunks_for_titles([target_event] if target_event else candidate_events[:1])
@@ -766,7 +856,7 @@ class AgenticGraphRAGPipeline:
             return {"stop_reason": "sufficient_evidence"}
         if state["iteration"] >= state["max_iterations"]:
             return {"stop_reason": "max_iterations"}
-        # Pillar 2: respect explicit routing signals from fallback node
+        # Respect explicit routing signals from fallback node
         if state.get("stop_reason") == "terminal_entity_resolved":
             return {"stop_reason": "sufficient_evidence"}
         if state.get("stop_reason") == "fallback_complete":
