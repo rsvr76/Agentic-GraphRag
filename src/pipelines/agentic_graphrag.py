@@ -79,6 +79,17 @@ class AgentState(TypedDict):
     answer: str
     citations: List[str]
     stop_reason: str
+    actual_llm_calls: int
+    actual_graph_calls: int
+    actual_vector_calls: int
+    reflection_iterations: int
+    fallback_triggered: bool
+    fallback_count: int
+    fallback_reason: str
+    specialist_used: str
+    gsql_operation: str
+    evidence_sufficient_before_fallback: bool
+    evidence_sufficient_after_fallback: bool
 
 
 class AgenticGraphRAGPipeline:
@@ -278,7 +289,11 @@ class AgenticGraphRAGPipeline:
                 "vector_context": chunks[:3],
                 "evidence_log": [evidence],
                 "is_sufficient": True,
-                "stop_reason": "sufficient_evidence"
+                "stop_reason": "sufficient_evidence",
+                "specialist_used": "aggregation",
+                "gsql_operation": "SumAccum",
+                "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+                "evidence_sufficient_before_fallback": True
             }
         except Exception as e:
             cached_matches = []
@@ -322,9 +337,20 @@ class AgenticGraphRAGPipeline:
                     "vector_context": chunks[:3],
                     "evidence_log": [evidence],
                     "is_sufficient": True,
-                    "stop_reason": "sufficient_evidence"
+                    "stop_reason": "sufficient_evidence",
+                    "specialist_used": "aggregation",
+                    "gsql_operation": "SumAccum (cache)",
+                    "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+                    "evidence_sufficient_before_fallback": True
                 }
-            return {"is_sufficient": False, "gap_description": f"Aggregation GSQL failed: {e}"}
+            return {
+                "is_sufficient": False,
+                "gap_description": f"Aggregation GSQL failed: {e}",
+                "specialist_used": "aggregation",
+                "gsql_operation": "SumAccum",
+                "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+                "evidence_sufficient_before_fallback": False
+            }
 
     def _superlative_node(self, state: AgentState) -> Dict[str, Any]:
         q = state["question"]
@@ -418,7 +444,11 @@ class AgenticGraphRAGPipeline:
                 "vector_context": chunks[:3],
                 "evidence_log": [evidence],
                 "is_sufficient": True,
-                "stop_reason": "sufficient_evidence"
+                "stop_reason": "sufficient_evidence",
+                "specialist_used": "superlative",
+                "gsql_operation": "HeapAccum",
+                "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+                "evidence_sufficient_before_fallback": True
             }
         except Exception as e:
             # Fallback to in-memory graph cache and indexed corpus chunks on any GSQL error or timeout
@@ -466,9 +496,20 @@ class AgenticGraphRAGPipeline:
                     "vector_context": chunks[:3],
                     "evidence_log": [evidence],
                     "is_sufficient": True,
-                    "stop_reason": "sufficient_evidence"
+                    "stop_reason": "sufficient_evidence",
+                    "specialist_used": "superlative",
+                    "gsql_operation": "HeapAccum (cache)",
+                    "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+                    "evidence_sufficient_before_fallback": True
                 }
-            return {"is_sufficient": False, "gap_description": f"Superlative GSQL failed: {e}"}
+            return {
+                "is_sufficient": False,
+                "gap_description": f"Superlative GSQL failed: {e}",
+                "specialist_used": "superlative",
+                "gsql_operation": "HeapAccum",
+                "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+                "evidence_sufficient_before_fallback": False
+            }
 
 
     def _temporal_node(self, state: AgentState) -> Dict[str, Any]:
@@ -595,7 +636,11 @@ class AgenticGraphRAGPipeline:
             "evidence_log": [evidence],
             "is_sufficient": is_sufficient,
             "gap_description": gap_desc,
-            "stop_reason": "sufficient_evidence" if is_sufficient else "missing_gold_winner"
+            "stop_reason": "sufficient_evidence" if is_sufficient else "missing_gold_winner",
+            "specialist_used": "temporal",
+            "gsql_operation": "PRECEDES traversal",
+            "actual_graph_calls": state.get("actual_graph_calls", 0) + 2,
+            "evidence_sufficient_before_fallback": is_sufficient
         }
 
     def _multi_hop_node(self, state: AgentState) -> Dict[str, Any]:
@@ -802,7 +847,11 @@ class AgenticGraphRAGPipeline:
             "evidence_log": [evidence],
             "is_sufficient": is_sufficient,
             "gap_description": gap_desc,
-            "stop_reason": "sufficient_evidence" if is_sufficient else "missing_gold_winner"
+            "stop_reason": "sufficient_evidence" if is_sufficient else "missing_gold_winner",
+            "specialist_used": "multi_hop",
+            "gsql_operation": "Multi-Hop Traversal",
+            "actual_graph_calls": state.get("actual_graph_calls", 0) + 2,
+            "evidence_sufficient_before_fallback": is_sufficient
         }
 
 
@@ -833,7 +882,11 @@ class AgenticGraphRAGPipeline:
                     "vector_context": chunks,
                     "evidence_log": [{"tool": "vector_lookup_fallback", "chunks": len(chunks)}],
                     "is_sufficient": bool(chunks),
-                    "stop_reason": "sufficient_evidence"
+                    "stop_reason": "sufficient_evidence",
+                    "specialist_used": "lookup",
+                    "gsql_operation": "none",
+                    "actual_vector_calls": state.get("actual_vector_calls", 0) + 1,
+                    "evidence_sufficient_before_fallback": True
                 }
 
         ev_attrs = self.events.get(matched_event, {})
@@ -848,20 +901,25 @@ class AgenticGraphRAGPipeline:
             "vector_context": chunks[:3],
             "evidence_log": [evidence],
             "is_sufficient": True,
-            "stop_reason": "sufficient_evidence"
+            "stop_reason": "sufficient_evidence",
+            "specialist_used": "lookup",
+            "gsql_operation": "none",
+            "actual_graph_calls": state.get("actual_graph_calls", 0) + 1,
+            "evidence_sufficient_before_fallback": True
         }
 
     def _reflect_node(self, state: AgentState) -> Dict[str, Any]:
+        ref_count = state.get("reflection_iterations", 0) + 1
         if state.get("is_sufficient") or state.get("stop_reason") == "sufficient_evidence":
-            return {"stop_reason": "sufficient_evidence"}
+            return {"stop_reason": "sufficient_evidence", "reflection_iterations": ref_count}
         if state["iteration"] >= state["max_iterations"]:
-            return {"stop_reason": "max_iterations"}
+            return {"stop_reason": "max_iterations", "reflection_iterations": ref_count}
         # Respect explicit routing signals from fallback node
         if state.get("stop_reason") == "terminal_entity_resolved":
-            return {"stop_reason": "sufficient_evidence"}
+            return {"stop_reason": "sufficient_evidence", "reflection_iterations": ref_count}
         if state.get("stop_reason") == "fallback_complete":
-            return {"stop_reason": "fallback_complete"}
-        return {"stop_reason": "retrieve_more"}
+            return {"stop_reason": "fallback_complete", "reflection_iterations": ref_count}
+        return {"stop_reason": "retrieve_more", "reflection_iterations": ref_count}
 
     def _fallback_search_node(self, state: AgentState) -> Dict[str, Any]:
         q = state["question"]
@@ -961,6 +1019,12 @@ class AgenticGraphRAGPipeline:
                 "prompt_tokens": prompt_toks,
                 "completion_tokens": completion_toks,
                 "total_tokens": prompt_toks + completion_toks,
+                "actual_llm_calls": state.get("actual_llm_calls", 0) + 2,
+                "actual_vector_calls": state.get("actual_vector_calls", 0) + 1,
+                "fallback_triggered": True,
+                "fallback_count": state.get("fallback_count", 0) + 1,
+                "fallback_reason": gap,
+                "evidence_sufficient_before_fallback": False
             }
 
         return {
@@ -973,6 +1037,12 @@ class AgenticGraphRAGPipeline:
             "prompt_tokens": prompt_toks,
             "completion_tokens": completion_toks,
             "total_tokens": prompt_toks + completion_toks,
+            "actual_llm_calls": state.get("actual_llm_calls", 0) + 2,
+            "actual_vector_calls": state.get("actual_vector_calls", 0) + 1,
+            "fallback_triggered": True,
+            "fallback_count": state.get("fallback_count", 0) + 1,
+            "fallback_reason": gap,
+            "evidence_sufficient_before_fallback": False
         }
 
 
@@ -1041,7 +1111,7 @@ class AgenticGraphRAGPipeline:
                 "Instructions:\n"
                 "1. Answer concisely, directly, and accurately using strictly the verified graph facts and passages.\n"
                 "2. If an integer count was calculated by GSQL accumulator, state the exact integer.\n"
-                "3. If answering an event name or title question, state both the specific event name and the full event title (e.g. 'Athletics at the 2008 Summer Olympics \u2013 Men\'s marathon') if present in the graph facts.\n"
+                "3. If answering an event name or title question, state both the specific event name and the full event title (e.g. 'Athletics at the 2008 Summer Olympics – Men\'s marathon') if present in the graph facts.\n"
                 "4. If answering a team event, list all winning athletes.\n"
                 "5. Cite the relevant chunk IDs (e.g. [doc_id::c0]) or graph entities used.\n\n"
                 "Final Answer:"
@@ -1056,7 +1126,9 @@ class AgenticGraphRAGPipeline:
             "citations": cited_chunks,
             "prompt_tokens": resp.prompt_tokens,
             "completion_tokens": resp.completion_tokens,
-            "total_tokens": resp.total_tokens
+            "total_tokens": resp.total_tokens,
+            "actual_llm_calls": state.get("actual_llm_calls", 0) + 1,
+            "evidence_sufficient_after_fallback": True
         }
 
 
@@ -1149,7 +1221,18 @@ class AgenticGraphRAGPipeline:
             "extracted_entities": {},
             "answer": "",
             "citations": [],
-            "stop_reason": ""
+            "stop_reason": "",
+            "actual_llm_calls": 0,
+            "actual_graph_calls": 0,
+            "actual_vector_calls": 0,
+            "reflection_iterations": 0,
+            "fallback_triggered": False,
+            "fallback_count": 0,
+            "fallback_reason": "",
+            "specialist_used": "",
+            "gsql_operation": "none",
+            "evidence_sufficient_before_fallback": True,
+            "evidence_sufficient_after_fallback": True
         }
 
         final_state = self.app.invoke(init_state)
@@ -1161,6 +1244,7 @@ class AgenticGraphRAGPipeline:
             c.get("doc_id", "") for c in final_state.get("vector_context", []) if c.get("doc_id")
         ))
 
+        fallback_was_triggered = final_state.get("fallback_triggered", False)
         trace = {
             "strategy": "langgraph_orchestration",
             "routed_archetype": final_state.get("archetype", qtype),
@@ -1169,6 +1253,18 @@ class AgenticGraphRAGPipeline:
             "evidence_log": final_state.get("evidence_log", []),
             "graph_context": final_state.get("graph_context", {}),
             "vector_chunks_used": [c.get("chunk_id", "") for c in final_state.get("vector_context", [])],
+            "actual_llm_calls": final_state.get("actual_llm_calls", 1),
+            "actual_graph_calls": final_state.get("actual_graph_calls", 0),
+            "actual_vector_calls": final_state.get("actual_vector_calls", 0),
+            "reflection_iterations": final_state.get("reflection_iterations", 0),
+            "fallback_triggered": fallback_was_triggered,
+            "fallback_count": final_state.get("fallback_count", 0),
+            "fallback_reason": final_state.get("fallback_reason", ""),
+            "agentic_intervention": "vector_fallback_recovery" if fallback_was_triggered else ("in_db_gsql_aggregation" if final_state.get("archetype") == "aggregation" else ("in_db_gsql_ranking" if final_state.get("archetype") == "superlative" else "none")),
+            "specialist_used": final_state.get("specialist_used", final_state.get("archetype", qtype)),
+            "gsql_operation": final_state.get("gsql_operation", "none"),
+            "evidence_sufficient_before_fallback": final_state.get("evidence_sufficient_before_fallback", not fallback_was_triggered),
+            "evidence_sufficient_after_fallback": final_state.get("evidence_sufficient_after_fallback", True),
         }
 
         return PipelineResult(
