@@ -33,7 +33,7 @@ The three retrieval pipelines were evaluated across all 100 questions in `Datase
 
 Key findings:
 - Accuracy Advantage: Agentic GraphRAG achieves +52.0% absolute accuracy over Standard RAG (99.0% vs. 47.0%) and +37.0% absolute accuracy over GraphRAG (99.0% vs. 62.0%).
-- Token Efficiency: In aggregation questions, in-database GSQL `SumAccum` reduces context tokens by 96% (~212 tokens vs. ~5,576 tokens) while achieving 100% mathematical precision.
+- Token Efficiency: In aggregation questions, in-database GSQL `SumAccum` reduces context tokens by 96.6% (211.6 tokens vs. 6,151.1 tokens in Standard RAG) while achieving 100% mathematical precision.
 - Speed Efficiency: Agentic GraphRAG executes 32.4% faster than Standard RAG (11.38s vs. 16.83s) by replacing multi-chunk semantic stuffing with targeted graph traversals.
 
 ### Archetype Breakdown (100 Public Questions)
@@ -44,8 +44,8 @@ The 100 questions in `Datasets/questions/eval_public.jsonl` span five distinct r
 | :--- | :---: | :---: | :---: | :---: | :--- |
 | **Lookup** | 19 | 100.0% (6,303.9 tok / 11.68s) | 100.0% (5,630.5 tok / 11.90s) | **100.0%** (2,076.6 tok / 1.96s) | **SIMPLE RAG SUFFICIENT:** 100% precision across all baselines; no multi-turn agent required. |
 | **Temporal** | 22 | 50.0% (6,112.6 tok / 21.80s) | **100.0%** (**4,965.3 tok** / **11.69s**) | 100.0% (10,333.9 tok / 15.37s) | **STATIC GRAPH SUFFICIENT:** 100% accuracy using 52% fewer tokens and lower latency than Agentic. |
-| **Aggregation** | 21 | 4.8% (6,151.1 tok / 20.28s) | 4.8% (5,506.2 tok / 17.80s) | **100.0%** (**211.6 tok** / **2.50s**) | **GRAPH COMPUTATION REQUIRED:** In-DB GSQL `SumAccum` resolves context overflow; agentic necessity requires ablation. |
-| **Superlative** | 10 | 40.0% (6,101.5 tok / 15.06s) | 50.0% (5,577.2 tok / 31.97s) | **100.0%** (**1,991.3 tok** / **2.99s**) | **GRAPH COMPUTATION REQUIRED:** In-DB GSQL `HeapAccum(1)` resolves ranking; agentic necessity requires ablation. |
+| **Aggregation** | 21 | 4.8% (6,151.1 tok / 20.28s) | 4.8% (5,506.2 tok / 17.80s) | **100.0%** (**211.6 tok** / **2.50s**) | **GRAPH COMPUTATION SUFFICIENT:** In-DB GSQL `SumAccum` achieves 100.0% alone; ablation proves agent adds 0% accuracy. |
+| **Superlative** | 10 | 40.0% (6,101.5 tok / 15.06s) | 50.0% (5,577.2 tok / 31.97s) | **100.0%** (**1,991.3 tok** / **2.99s**) | **GRAPH COMPUTATION + AGENTIC FALLBACK REQUIRED:** In-DB `HeapAccum(1)` achieves 80.0%; agentic fallback adds the final +20.0%. |
 | **Multi-Hop** | 28 | 42.9% (6,787.3 tok / 14.47s) | 53.6% (5,155.9 tok / 12.18s) | **96.4%** (8,352.2 tok / 24.30s) | **ADAPTIVE / AGENTIC VALUE DEMONSTRATED:** Self-RAG reflection + corrective fallback recovers missing graph records. |
 
 ### Comparative Analysis: Where Additional Architecture Becomes Necessary
@@ -62,16 +62,18 @@ The central principle of this evaluation is:
 - Explicit Temporal Sequences (22 Questions): Static GraphRAG achieves **100.0% accuracy** (22/22) while consuming **4,965.3 tokens** and **11.69 seconds** per query. In comparison, Agentic GraphRAG also scores 100.0% but burns **10,333.9 tokens** and **15.37 seconds** due to redundant multi-turn reflection checks. When chronological relationships are explicitly encoded via directed `PRECEDES` graph edges, a deterministic 1-hop graph query resolves the sequence directly. **Static GraphRAG is the superior production choice for this archetype.**
 
 #### 3. Where Graph-Native Computation Is Required
-- Multi-Document Aggregations (21 Questions): Both Standard RAG (4.8%) and Static GraphRAG (4.8%) fail almost completely. Vector search cannot perform exhaustive counting across disparate documents, resulting in lost-in-the-middle context overflow and hallucinated math. Static GraphRAG cannot evaluate runtime conditional filters (`e.competitors > threshold`) across an entire competition without context bloating. In-database GSQL `SumAccum` reaches **100.0%** with **96% fewer tokens** (211.6 vs. 6,151.1 tokens) in only 2.50s.
+- Multi-Document Aggregations (21 Questions): Both Standard RAG (4.8%) and Static GraphRAG (4.8%) fail almost completely. Vector search cannot perform exhaustive counting across disparate documents, resulting in lost-in-the-middle context overflow and hallucinated math. Static GraphRAG cannot evaluate runtime conditional filters (`e.competitors > threshold`) across an entire competition without context bloating. In-database GSQL `SumAccum` reaches **100.0%** with **96.6% fewer tokens** (211.6 vs. 6,151.1 tokens) in only 2.50s.
 - Superlative Extremities (10 Questions): Standard RAG (40.0%) and Static GraphRAG (50.0%) fail to rank competitor extremes because semantic vector similarity has no mathematical ordering concept. In-database GSQL `HeapAccum(1)` reaches **100.0%** in 2.99s by maintaining a fixed-size priority queue in-database in constant memory.
 
 #### 4. Where Adaptive Agentic Behavior Adds Value
 - Multi-Hop Collisions & Incomplete Knowledge Graphs (28 Questions): Standard RAG (42.9%) and Static GraphRAG (53.6%) fail when multiple events share the same venue and date, or when a graph relation was omitted during ingestion. Agentic GraphRAG achieves **96.4%** via overlap-ranked date span resolution to break venue collisions, and its Self-RAG reflection node autonomously diagnoses graph gaps to execute targeted fallback vector search over raw article passages. Execution traces demonstrate adaptive evidence recovery through reflection and targeted fallback retrieval. This is the strongest current evidence for agentic value.
 
-#### 5. What Still Requires Ablation
-The current 3-way benchmark demonstrates architectural superiority but does not fully isolate causal contribution between agentic orchestration and specialized TigerGraph operations.
-- In **Aggregation** and **Superlative** queries, the dramatic performance gain is driven by in-database GSQL accumulators (`SumAccum` and `HeapAccum`). The current 3-way benchmark does not isolate whether LangGraph state orchestration itself is necessary or if a static graph query pipeline equipped with GSQL accumulators would achieve identical performance.
-- To rigorously answer this question, controlled ablation experiments without agentic orchestration are required. The framework and pipeline configurations for these ablations are implemented in `src/evaluation/ablation.py`.
+#### 5. Empirical Component Ablation Results (Causal Attribution Verified)
+Controlled ablation experiments executed directly across the public benchmark (saved in `results/public_100/ablation_results.json`) rigorously isolate the causal mechanisms:
+- **Aggregation (21 Questions):** `Static Graph + GSQL SumAccum (No Agent)` achieves **100.0%** (21/21 passed, 204.2 avg tokens, 7.99s latency), exactly matching Full Agentic GraphRAG (100.0%). **Causal attribution:** In-database GSQL computation alone drives 100% of the gain over baseline Static GraphRAG (4.8%); agentic orchestration adds 0.0% accuracy.
+- **Superlative (10 Questions):** `Static Graph + GSQL HeapAccum (No Agent)` achieves **80.0%** (8/10 passed, 157.9 avg tokens, 1.94s latency), up from 50.0% in Static GraphRAG. Full Agentic GraphRAG reaches **100.0%**. **Causal attribution:** In-database HeapAccum priority queues provide +30.0% directly; LangGraph's diagnostic corrective loop contributes the remaining +20.0% when graph edge/naming gaps occur.
+- **Multi-Hop Date-Span Disambiguation (28 Questions):** `Graph + Date-Span Resolution (No Fallback)` achieves **92.9%** (26/28 passed, 188.7 avg tokens, 2.77s latency), up from 53.6% in Static GraphRAG (+39.3% gain). **Causal attribution:** Deterministic bigram date-span overlap resolves venue-date collisions in 26 of 28 cases without requiring vector fallback.
+- **Multi-Hop Single-Pass Fallback (28 Questions):** `Graph + Single-Pass Vector Fallback` achieves **85.7%** (24/28 passed, 583.9 avg tokens, 1.96s latency). Full Agentic GraphRAG with iterative Self-RAG reflection reaches **96.4%** (27/28 passed). **Causal attribution:** Iterative Self-RAG reflection provides the final +10.7% margin by validating evidence completeness and filtering noisy chunk distractors.
 
 ### Empirical Resource Footprint & Economic Trade-Off (100-Question Basis)
 

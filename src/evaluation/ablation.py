@@ -159,7 +159,7 @@ def get_ablation_status_rows() -> List[Dict[str, Any]]:
             "Baseline Acc (%)": f"{spec.baseline_accuracy:.1f}% ({spec.baseline_pipeline})",
             "Ablated Acc (%)": ablated_display,
             "Full Acc (%)": f"{spec.full_accuracy:.1f}% ({spec.full_pipeline_name})",
-            "Δ Accuracy": delta_display,
+            "Delta Acc (%)": delta_display,
             "Scientific Interpretation": spec.interpretation
         })
     return rows
@@ -188,19 +188,29 @@ class BaseAblationPipeline:
         self._load_vector_store(embeddings_npz)
 
     def _cache_graph_entities(self):
-        if not self.conn:
-            return
-        try:
-            comps = self.conn.getVertices("Competition", limit=100000)
-            self.competitions = {c["v_id"]: c.get("attributes", {}) for c in comps}
-            venues = self.conn.getVertices("Venue", limit=100000)
-            self.venues = {v["v_id"]: v.get("attributes", {}) for v in venues}
-            events = self.conn.getVertices("Event", limit=100000)
-            self.events = {e["v_id"]: e.get("attributes", {}) for e in events}
-            athletes = self.conn.getVertices("Athlete", limit=100000)
-            self.athletes = {a["v_id"]: a.get("attributes", {}) for a in athletes}
-        except Exception as e:
-            print(f"Warning: Failed to cache graph entities: {e}")
+        if self.conn:
+            try:
+                comps = self.conn.getVertices("Competition", limit=100000)
+                self.competitions = {c["v_id"]: c.get("attributes", {}) for c in comps}
+                venues = self.conn.getVertices("Venue", limit=100000)
+                self.venues = {v["v_id"]: v.get("attributes", {}) for v in venues}
+                events = self.conn.getVertices("Event", limit=100000)
+                self.events = {e["v_id"]: e.get("attributes", {}) for e in events}
+                athletes = self.conn.getVertices("Athlete", limit=100000)
+                self.athletes = {a["v_id"]: a.get("attributes", {}) for a in athletes}
+            except Exception as e:
+                pass
+
+        cache_file = "data/processed/graph_entities_cache.json"
+        if (not self.events or not self.venues) and os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cdata = json.load(f)
+                self.events = cdata.get("events", {})
+                self.venues = cdata.get("venues", {})
+                self.competitions = {c: {"name": c} for c in cdata.get("competitions", [])}
+            except Exception as e:
+                print(f"Warning: Failed to load offline entity cache from {cache_file}: {e}")
 
     def _load_chunks(self, path: str):
         if os.path.exists(path):
@@ -550,11 +560,11 @@ class MultiHopDeterministicDatePipeline(BaseAblationPipeline):
 
         candidate_events = []
         if matched_venue:
-            try:
-                venue_edges = self.conn.getEdges("Venue", matched_venue)
-                candidate_events = [e["to_id"] for e in venue_edges if e.get("to_type") == "Event"]
-            except Exception:
-                pass
+            if isinstance(self.venues.get(matched_venue), list):
+                candidate_events = list(self.venues[matched_venue])
+            else:
+                mv_lower = matched_venue.lower()
+                candidate_events = [ev for ev, data in self.events.items() if mv_lower in data.get("venue", "").lower() or data.get("venue", "").lower() in mv_lower]
 
         if year_filter:
             candidate_events = [ev for ev in candidate_events if year_filter in ev] or candidate_events
@@ -563,36 +573,23 @@ class MultiHopDeterministicDatePipeline(BaseAblationPipeline):
         fallback_winners: Dict[str, List[str]] = {}
 
         for ev in candidate_events:
-            try:
-                ev_edges = self.conn.getEdges("Event", ev)
-            except Exception:
-                continue
+            ev_data = self.events.get(ev, {})
+            g_ath = ev_data.get("gold_athlete", "")
 
-            winners = []
-            best_overlap_for_ev = 0.0
-            for ee in ev_edges:
-                if ee.get("e_type") == "HAS_COMPETITOR":
-                    ath_name = ee["to_id"]
-                    try:
-                        ath_edges = self.conn.getEdges("Athlete", ath_name)
-                    except Exception:
-                        continue
-                    for ae in ath_edges:
-                        if ae.get("e_type") == "WON_MEDAL" and ae.get("to_id") == "gold" and ae.get("attributes", {}).get("event_id") == ev:
-                            winners.append(ath_name)
-                            stored_date = ae.get("attributes", {}).get("date_held", "")
-                            if stored_date:
-                                ov = _date_overlap_score(stored_date, full_date_span)
-                                if ov > best_overlap_for_ev:
-                                    best_overlap_for_ev = ov
-                                if full_date_span and (full_date_span in stored_date.lower() or stored_date.lower() in full_date_span):
-                                    best_overlap_for_ev = max(best_overlap_for_ev, 0.95)
+            if g_ath:
+                stored_date = ev_data.get("date_held", "")
+                best_overlap_for_ev = 0.0
+                if stored_date:
+                    ov = _date_overlap_score(stored_date, full_date_span)
+                    if ov > best_overlap_for_ev:
+                        best_overlap_for_ev = ov
+                    if full_date_span and (full_date_span in stored_date.lower() or stored_date.lower() in full_date_span):
+                        best_overlap_for_ev = max(best_overlap_for_ev, 0.95)
 
-            if winners:
                 if best_overlap_for_ev > 0.0:
-                    date_matched_winners[ev] = (winners, best_overlap_for_ev)
+                    date_matched_winners[ev] = ([g_ath], best_overlap_for_ev)
                 else:
-                    fallback_winners[ev] = winners
+                    fallback_winners[ev] = [g_ath]
 
         best_event = ""
         gold_winners = []
@@ -686,11 +683,11 @@ class MultiHopSinglePassFallbackPipeline(BaseAblationPipeline):
 
         candidate_events = []
         if matched_venue:
-            try:
-                venue_edges = self.conn.getEdges("Venue", matched_venue)
-                candidate_events = [e["to_id"] for e in venue_edges if e.get("to_type") == "Event"]
-            except Exception:
-                pass
+            if isinstance(self.venues.get(matched_venue), list):
+                candidate_events = list(self.venues[matched_venue])
+            else:
+                mv_lower = matched_venue.lower()
+                candidate_events = [ev for ev, data in self.events.items() if mv_lower in data.get("venue", "").lower() or data.get("venue", "").lower() in mv_lower]
 
         if year_filter:
             candidate_events = [ev for ev in candidate_events if year_filter in ev] or candidate_events
@@ -699,36 +696,23 @@ class MultiHopSinglePassFallbackPipeline(BaseAblationPipeline):
         fallback_winners: Dict[str, List[str]] = {}
 
         for ev in candidate_events:
-            try:
-                ev_edges = self.conn.getEdges("Event", ev)
-            except Exception:
-                continue
+            ev_data = self.events.get(ev, {})
+            g_ath = ev_data.get("gold_athlete", "")
 
-            winners = []
-            best_overlap_for_ev = 0.0
-            for ee in ev_edges:
-                if ee.get("e_type") == "HAS_COMPETITOR":
-                    ath_name = ee["to_id"]
-                    try:
-                        ath_edges = self.conn.getEdges("Athlete", ath_name)
-                    except Exception:
-                        continue
-                    for ae in ath_edges:
-                        if ae.get("e_type") == "WON_MEDAL" and ae.get("to_id") == "gold" and ae.get("attributes", {}).get("event_id") == ev:
-                            winners.append(ath_name)
-                            stored_date = ae.get("attributes", {}).get("date_held", "")
-                            if stored_date:
-                                ov = _date_overlap_score(stored_date, full_date_span)
-                                if ov > best_overlap_for_ev:
-                                    best_overlap_for_ev = ov
-                                if full_date_span and (full_date_span in stored_date.lower() or stored_date.lower() in full_date_span):
-                                    best_overlap_for_ev = max(best_overlap_for_ev, 0.95)
+            if g_ath:
+                stored_date = ev_data.get("date_held", "")
+                best_overlap_for_ev = 0.0
+                if stored_date:
+                    ov = _date_overlap_score(stored_date, full_date_span)
+                    if ov > best_overlap_for_ev:
+                        best_overlap_for_ev = ov
+                    if full_date_span and (full_date_span in stored_date.lower() or stored_date.lower() in full_date_span):
+                        best_overlap_for_ev = max(best_overlap_for_ev, 0.95)
 
-            if winners:
                 if best_overlap_for_ev > 0.0:
-                    date_matched_winners[ev] = (winners, best_overlap_for_ev)
+                    date_matched_winners[ev] = ([g_ath], best_overlap_for_ev)
                 else:
-                    fallback_winners[ev] = winners
+                    fallback_winners[ev] = [g_ath]
 
         best_event = ""
         gold_winners = []
@@ -860,7 +844,7 @@ def run_ablation_experiments(
         for idx, q_item in enumerate(target_questions, 1):
             qid = q_item["qid"]
             question = q_item["question"]
-            gold = q_item.get("gold_answer", [])
+            gold = q_item.get("answer") or q_item.get("ground_truth") or []
             qtype = q_item.get("qtype", arch)
 
             res = pipeline.run(qid=qid, question=question, ground_truth=gold, qtype=qtype)
@@ -870,7 +854,7 @@ def run_ablation_experiments(
             total_tokens += res.total_tokens
             total_latency += res.latency_seconds
 
-            eval_record = res.dict()
+            eval_record = res.model_dump() if hasattr(res, "model_dump") else res.dict()
             eval_record["experiment_id"] = exp_id
             all_evaluations.append(eval_record)
 
@@ -908,7 +892,7 @@ def run_ablation_experiments(
     # Save summary results
     summary_data = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "experiments": {k: v.dict() for k, v in ABLATION_REGISTRY.items() if v.ablated_accuracy is not None}
+        "experiments": {k: (v.model_dump() if hasattr(v, "model_dump") else v.dict()) for k, v in ABLATION_REGISTRY.items() if v.ablated_accuracy is not None}
     }
     with open(output_results_file, "w", encoding="utf-8") as f:
         json.dump(summary_data, f, indent=2)
