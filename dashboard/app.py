@@ -1,6 +1,5 @@
 """Streamlit Metrics Dashboard: 3-Way Pipeline Comparison & Live Query Investigator.
 
-Implements Section 11.3 of Final Plan (v3):
 1. Aggregate comparison: Grouped metrics & charts across Standard RAG, GraphRAG, and Agentic GraphRAG.
 2. Per-archetype breakdown: Rows = archetype, columns = pipeline, cell = accuracy/tokens.
 3. Accuracy-vs-tokens scatter: Pareto-frontier framing showing agentic efficiency.
